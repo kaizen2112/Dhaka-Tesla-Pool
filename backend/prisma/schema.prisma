@@ -1,13 +1,13 @@
-// Dhaka Tesla Pool — starter schema. See docs/DATABASE.md for rationale.
-// Run `npx prisma migrate dev --name init` after dropping this into backend/prisma/.
+// Dhaka Tesla Pool — schema. See docs/DATABASE.md for full rationale per table.
 
 generator client {
   provider = "prisma-client-js"
 }
 
+// Connection URLs live in prisma.config.ts (CLI) and prisma.service.ts (runtime adapter) —
+// Prisma 7 no longer allows url/directUrl in the schema file itself.
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum UserRole {
@@ -24,112 +24,131 @@ enum RideStatus {
   CANCELLED
 }
 
-model User {
-  id           String   @id @default(uuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         UserRole
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+enum PaymentMethod {
+  CASH
+  WALLET
+}
 
-  vehicle         Vehicle?         @relation("DriverVehicle")
-  rideRequests    RideRequest[]
-  poolMemberships PoolMembership[]
-  wallet          Wallet?
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+}
+
+model User {
+  id            String              @id @default(uuid())
+  name          String
+  email         String              @unique
+  passwordHash  String
+  role          UserRole
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  vehicle       Vehicle?
+  rideRequests  RideRequest[]
+  memberships   PoolMembership[]
+  wallet        Wallet?
+  statusChanges RideStatusHistory[]
 }
 
 model Vehicle {
   id        String   @id @default(uuid())
   driverId  String   @unique
-  driver    User     @relation("DriverVehicle", fields: [driverId], references: [id])
-  name      String // e.g. "Bullet"
+  driver    User     @relation(fields: [driverId], references: [id])
+  name      String
   capacity  Int
   isOnline  Boolean  @default(false)
   createdAt DateTime @default(now())
-
-  pools Pool[]
+  updatedAt DateTime @updatedAt
+  pools     Pool[]
 }
 
 model RideRequest {
-  id              String     @id @default(uuid())
+  id              String              @id @default(uuid())
   passengerId     String
-  passenger       User       @relation(fields: [passengerId], references: [id])
+  passenger       User                @relation(fields: [passengerId], references: [id])
   pickupZone      String
   destinationZone String
-  seats           Int        @default(1)
-  status          RideStatus @default(REQUESTED)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  seats           Int
+  status          RideStatus          @default(REQUESTED)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  membership      PoolMembership?
+  history         RideStatusHistory[]
 
-  membership PoolMembership?
-
-  @@index([passengerId])
+  @@index([passengerId, createdAt])
+  @@index([status])
 }
 
 model Pool {
-  id              String     @id @default(uuid())
+  id              String              @id @default(uuid())
   vehicleId       String
-  vehicle         Vehicle    @relation(fields: [vehicleId], references: [id])
+  vehicle         Vehicle             @relation(fields: [vehicleId], references: [id])
   pickupZone      String
   destinationZone String
-  occupiedSeats   Int        @default(0)
-  status          RideStatus @default(REQUESTED)
-  version         Int        @default(0) // optimistic-lock counter, see docs/ARCHITECTURE.md §6
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  capacity        Int
+  occupiedSeats   Int
+  status          RideStatus          @default(MATCHED)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  memberships     PoolMembership[]
+  history         RideStatusHistory[]
 
-  memberships   PoolMembership[]
-  statusHistory RideStatusHistory[]
-
-  @@index([vehicleId])
+  @@index([vehicleId, status])
 }
 
 model PoolMembership {
-  id            String      @id @default(uuid())
-  poolId        String
-  pool          Pool        @relation(fields: [poolId], references: [id])
-  rideRequestId String      @unique
-  rideRequest   RideRequest @relation(fields: [rideRequestId], references: [id])
-  passengerId   String
-  passenger     User        @relation(fields: [passengerId], references: [id])
-  seats         Int
-  farePoysha    Int
-  joinedAt      DateTime    @default(now())
+  id                String             @id @default(uuid())
+  poolId            String
+  pool              Pool               @relation(fields: [poolId], references: [id])
+  rideRequestId     String             @unique
+  rideRequest       RideRequest        @relation(fields: [rideRequestId], references: [id])
+  passengerId       String
+  passenger         User               @relation(fields: [passengerId], references: [id])
+  seats             Int
+  farePoysha        Int
+  joinedAt          DateTime           @default(now())
+  cancelledAt       DateTime?
+  paymentMethod     PaymentMethod?
+  paidAt            DateTime?
+  walletTransaction WalletTransaction?
 
   @@index([poolId])
 }
 
 model RideStatusHistory {
-  id         String      @id @default(uuid())
-  poolId     String
-  pool       Pool        @relation(fields: [poolId], references: [id])
-  fromStatus RideStatus?
-  toStatus   RideStatus
-  changedAt  DateTime    @default(now())
-  note       String?
+  id            String       @id @default(uuid())
+  poolId        String?
+  pool          Pool?        @relation(fields: [poolId], references: [id])
+  rideRequestId String?
+  rideRequest   RideRequest? @relation(fields: [rideRequestId], references: [id])
+  fromStatus    RideStatus?
+  toStatus      RideStatus
+  actorUserId   String
+  actor         User         @relation(fields: [actorUserId], references: [id])
+  changedAt     DateTime     @default(now())
 
   @@index([poolId])
+  @@index([rideRequestId])
 }
 
 model Wallet {
-  id            String   @id @default(uuid())
-  userId        String   @unique
-  user          User     @relation(fields: [userId], references: [id])
-  balancePoysha Int      @default(0)
-  updatedAt     DateTime @updatedAt
-
-  transactions WalletTransaction[]
+  id            String              @id @default(uuid())
+  userId        String              @unique
+  user          User                @relation(fields: [userId], references: [id])
+  balancePoysha Int                 @default(0)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  transactions  WalletTransaction[]
 }
 
 model WalletTransaction {
-  id           String   @id @default(uuid())
-  walletId     String
-  wallet       Wallet   @relation(fields: [walletId], references: [id])
-  amountPoysha Int // negative = debit, positive = credit
-  type         String // "RIDE_PAYMENT" | "TOPUP" | ...
-  reference    String? // e.g. a PoolMembership id
-  createdAt    DateTime @default(now())
+  id               String                @id @default(uuid())
+  walletId         String
+  wallet           Wallet                @relation(fields: [walletId], references: [id])
+  type             WalletTransactionType
+  amountPoysha     Int
+  poolMembershipId String?               @unique
+  poolMembership   PoolMembership?       @relation(fields: [poolMembershipId], references: [id])
+  createdAt        DateTime              @default(now())
 
-  @@index([walletId])
+  @@index([walletId, createdAt])
 }
