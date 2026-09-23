@@ -1,5 +1,6 @@
-# `docker compose up` from the repo root runs the whole stack. Every variable has a local
-# default, so a fresh clone works without a .env; copy .env.example to .env to override.
+# `docker compose up` from the repo root runs the whole stack: db, backend (:3000) and
+# frontend (:3001). Every variable has a local default, so a fresh clone works without a .env;
+# copy .env.example to .env to override.
 services:
   db:
     image: postgres:17-alpine
@@ -41,6 +42,26 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s # migrate + seed run before the API listens
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the browser bundle at build time (see frontend/Dockerfile). The browser
+        # calls the API, so this is the host URL, not http://backend:3000.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    # 3001 because the API has 3000; backend FRONTEND_ORIGIN (CORS) defaults to this origin.
+    ports:
+      - '3001:3001'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/login > /dev/null || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   db_data:
