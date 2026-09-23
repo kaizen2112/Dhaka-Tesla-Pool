@@ -147,16 +147,19 @@ export interface PoolFares {
     passengerName: string;
     pickupZone: string;
     destinationZone: string;
-    farePoysha: number;
-    breakdown: {
-      pricingKm: number;
-      seats: number;
-      basePoysha: number;
-      distanceChargePoysha: number;
-      discountPoysha: number;
-      farePoysha: number;
-    };
+    farePoysha: number; // stored: the estimate at join, then the final fare at COMPLETED
+    breakdown: FareBreakdown; // recomputed now for the pool's current members
   }[];
+}
+
+// Totals for all `seats`: basePoysha + distanceChargePoysha − discountPoysha = farePoysha.
+export interface FareBreakdown {
+  pricingKm: number;
+  seats: number;
+  basePoysha: number;
+  distanceChargePoysha: number;
+  discountPoysha: number;
+  farePoysha: number;
 }
 
 // GET /vehicles/me, PATCH /vehicles/me/status

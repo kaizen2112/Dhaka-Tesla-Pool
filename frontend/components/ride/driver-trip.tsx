@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { FareBreakdown, shownFare } from "@/components/ride/fare";
 import { SeatsIndicator } from "@/components/ride/seats-indicator";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, Skeleton } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { useApi } from "@/hooks/use-api";
 import { api } from "@/lib/api-client";
 import { errorMessage } from "@/lib/errors";
 import { formatTaka } from "@/lib/format";
-import type { DriverPool, RideStatus } from "@/lib/types";
+import type { DriverPool, PoolFares, RideStatus } from "@/lib/types";
 import { route } from "@/lib/zones";
 
 // The one next step from each status (docs/ARCHITECTURE.md §3 pool transitions). Only that
@@ -33,6 +34,8 @@ const STATUS_LINE: Record<RideStatus, string> = {
 
 export function DriverTrip({ poolId }: { poolId: string }) {
   const { data: pool, error, reload } = useApi<DriverPool>(`/pools/${poolId}`, 5000);
+  // The driver gets every active passenger's breakdown (API_SPEC → GET /pools/:id/fares).
+  const fares = useApi<PoolFares>(`/pools/${poolId}/fares`, 5000);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -55,6 +58,7 @@ export function DriverTrip({ poolId }: { poolId: string }) {
     } finally {
       setBusy(false);
       reload();
+      fares.reload();
     }
   }
 
@@ -83,18 +87,34 @@ export function DriverTrip({ poolId }: { poolId: string }) {
           <p className="text-muted">No passengers.</p>
         ) : (
           <ul className="divide-y divide-border border-y border-border">
-            {pool.members.map((m) => (
-              <li key={m.membershipId} className="flex items-center justify-between gap-4 py-3">
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">{m.passengerName}</span>
-                  <span className="text-xs text-muted">
-                    {route(m.pickupZone, m.destinationZone)} · {m.seats} {m.seats === 1 ? "seat" : "seats"}
-                  </span>
-                </div>
-                {/* Each passenger's own fare, never a split of a pool total (ARCHITECTURE §7). */}
-                <span className="font-mono tabular-nums">{formatTaka(m.farePoysha)}</span>
-              </li>
-            ))}
+            {pool.members.map((m) => {
+              const fare = fares.data?.fares.find((f) => f.membershipId === m.membershipId);
+              return (
+                <li key={m.membershipId} className="flex flex-col gap-2 py-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium">{m.passengerName}</span>
+                      <span className="text-xs text-muted">
+                        {route(m.pickupZone, m.destinationZone)} · {m.seats} {m.seats === 1 ? "seat" : "seats"}
+                      </span>
+                    </div>
+                    {/* Each passenger's own fare, never a split of a pool total (ARCHITECTURE §7). */}
+                    <span className="font-mono tabular-nums">
+                      {formatTaka(fare ? shownFare(fare, final) : m.farePoysha)}
+                    </span>
+                  </div>
+                  {fare && (
+                    // Native disclosure: no JS, keyboard and screen-reader friendly.
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-muted hover:text-foreground">Breakdown</summary>
+                      <div className="pt-2">
+                        <FareBreakdown breakdown={fare.breakdown} />
+                      </div>
+                    </details>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

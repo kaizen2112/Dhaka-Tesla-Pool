@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Fare } from "@/components/ride/fare";
+import { Fare, FareBreakdown, shownFare } from "@/components/ride/fare";
+import { PaymentPanel } from "@/components/ride/payment-panel";
 import { SeatsIndicator } from "@/components/ride/seats-indicator";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, Skeleton } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { useApi } from "@/hooks/use-api";
 import { api } from "@/lib/api-client";
 import { errorMessage } from "@/lib/errors";
-import type { MyRideRequest, RideRequestDetail, RideStatus } from "@/lib/types";
+import type { MyRideRequest, PoolFares, RideRequestDetail, RideStatus } from "@/lib/types";
 import { route, zoneName } from "@/lib/zones";
 
 const POLL_MS = 5000;
@@ -19,13 +20,11 @@ const ACTIVE: RideStatus[] = ["REQUESTED", "MATCHED", "DRIVER_ARRIVED", "STARTED
 // docs/ARCHITECTURE.md §3: a passenger can cancel until the trip starts.
 const CANCELLABLE: RideStatus[] = ["REQUESTED", "MATCHED", "DRIVER_ARRIVED"];
 
-// The ride to show: the newest request while it's active, or once it's completed but unpaid
-// (so the final fare stays on screen). Only one request can be active at a time.
+// The ride to show: the newest request while it's active, or once it's completed (to pay,
+// then as a receipt until the next booking). Only one request can be active at a time.
 function currentRide(requests: MyRideRequest[]) {
   const latest = requests[0];
-  if (!latest) return null;
-  if (ACTIVE.includes(latest.status)) return latest;
-  if (latest.status === "COMPLETED" && !latest.membership?.paidAt) return latest;
+  if (latest && (ACTIVE.includes(latest.status) || latest.status === "COMPLETED")) return latest;
   return null;
 }
 
@@ -76,7 +75,7 @@ function statusLine({ request, pool }: RideRequestDetail) {
     case "STARTED":
       return `On the way to ${zoneName(request.destinationZone)}.`;
     case "COMPLETED":
-      return "You've arrived.";
+      return "You've arrived. Each passenger pays their own fare.";
     case "CANCELLED":
       return "This ride was cancelled.";
   }
@@ -84,6 +83,10 @@ function statusLine({ request, pool }: RideRequestDetail) {
 
 function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () => void }) {
   const { request, membership, pool } = ride;
+  const final = request.status === "COMPLETED";
+  // A passenger sees only their own entry (API_SPEC → GET /pools/:id/fares).
+  const fares = useApi<PoolFares>(pool ? `/pools/${pool.id}/fares` : null, POLL_MS);
+  const ownFare = fares.data?.fares[0];
   const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -126,7 +129,18 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
         </dl>
       )}
 
-      {membership && <Fare poysha={membership.farePoysha} final={request.status === "COMPLETED"} />}
+      {membership && (
+        <div className="flex flex-col gap-3">
+          <Fare poysha={ownFare ? shownFare(ownFare, final) : membership.farePoysha} final={final} />
+          {ownFare && <FareBreakdown breakdown={ownFare.breakdown} />}
+        </div>
+      )}
+      {final && membership && <PaymentPanel membership={membership} onPaid={onChange} />}
+      {final && membership?.paidAt && (
+        <Link href="/passenger/request" className={buttonClasses("primary", "md", "self-start")}>
+          Request another ride
+        </Link>
+      )}
 
       {actionError && (
         <p role="alert" className="text-sm text-danger">
