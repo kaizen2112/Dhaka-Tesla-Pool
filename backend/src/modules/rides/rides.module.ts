@@ -1,10 +1,14 @@
 import { Module } from '@nestjs/common';
+import { FareModule } from '../fares/fare.module';
 import { LocationModule } from '../location/location.module';
 import { MatchingService } from './matching.service';
+import { RideRequestsController } from './ride-requests.controller';
 import { RideStateService } from './ride-state.service';
+import { RidesService } from './rides.service';
 
 @Module({
-  imports: [LocationModule],
-  providers: [RideStateService, MatchingService],
+  imports: [LocationModule, FareModule],
+  controllers: [RideRequestsController],
+  providers: [RidesService, RideStateService, MatchingService],
 })
 export class RidesModule {}
