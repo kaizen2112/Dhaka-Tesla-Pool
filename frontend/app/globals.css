@@ -1,26 +1,53 @@
 @import "tailwindcss";
 
+/* Monochrome tokens — docs/UI_GUIDE.md §2. Components use these names only. */
 :root {
   --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --surface: #fafafa;
+  --foreground: #0a0a0a;
+  --muted: #737373;
+  --border: #e5e5e5;
+  --border-strong: #d4d4d4;
+  --primary: #0a0a0a;
+  --primary-foreground: #fafafa;
+  --danger: #dc2626;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
+    --surface: #141414;
     --foreground: #ededed;
+    --muted: #a3a3a3;
+    --border: #262626;
+    --border-strong: #404040;
+    --primary: #ededed;
+    --primary-foreground: #0a0a0a;
+    --danger: #f87171;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Chrome paints autofilled fields light blue; keep them on the monochrome tokens. */
+input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px var(--background) inset;
+  -webkit-text-fill-color: var(--foreground);
 }
