@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
+import { PassengerDashboard } from "@/components/ride/passenger-dashboard";
 
-export const metadata: Metadata = { title: "Dashboard" };
+export const metadata: Metadata = { title: "Your ride" };
 
-// Filled in by the passenger UI commit (docs/COMMIT_PLAN.md → 19).
 export default function PassengerDashboardPage() {
-  return <h1 className="text-2xl font-semibold tracking-tight">Your rides</h1>;
+  return (
+    <>
+      <h1 className="text-2xl font-semibold tracking-tight">Your ride</h1>
+      <PassengerDashboard />
+    </>
+  );
 }

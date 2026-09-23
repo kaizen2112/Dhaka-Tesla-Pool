@@ -1,4 +1,5 @@
 import { ApiError } from "./api-client";
+import type { WaitReason } from "./types";
 
 // One sentence per backend `error` code (docs/API_SPEC.md → Error shape). The raw `message`
 // is never shown: it's written for developers and can change without notice.
@@ -27,4 +28,17 @@ const MESSAGES: Record<string, string> = {
 export function errorMessage(error: unknown, overrides: Record<string, string> = {}) {
   const code = error instanceof ApiError ? error.code : "";
   return overrides[code] ?? MESSAGES[code] ?? "Something went wrong. Try again.";
+}
+
+// Why a new request is waiting instead of joining a pool (POST /ride-requests → matchResult).
+const WAIT_REASONS: Record<WaitReason, string> = {
+  NO_OPEN_POOLS: "No Tesla is taking passengers yet.",
+  CAPACITY_EXCEEDED: "The open Tesla doesn't have enough free seats.",
+  PICKUP_TOO_FAR: "The open Tesla's pickup is more than 2 km from yours.",
+  EXTRA_DISTANCE_TOO_HIGH:
+    "Sharing the open Tesla would take someone more than 2 km out of their way.",
+};
+
+export function waitReason(reason: WaitReason) {
+  return `${WAIT_REASONS[reason]} You'll be matched when a driver accepts your request.`;
 }

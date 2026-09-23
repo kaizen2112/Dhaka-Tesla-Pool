@@ -4,3 +4,12 @@ export function formatTaka(poysha: number) {
   const abs = Math.abs(poysha);
   return `${sign}৳${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
 }
+
+export function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
