@@ -1,3 +1,5 @@
+# `docker compose up` from the repo root runs the whole stack. Every variable has a local
+# default, so a fresh clone works without a .env; copy .env.example to .env to override.
 services:
   db:
     image: postgres:17-alpine
@@ -15,6 +17,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Inside compose the database host is the service name `db`, not localhost.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tesla}:${POSTGRES_PASSWORD:-tesla}@db:5432/${POSTGRES_DB:-tesla_pool}?schema=public
+      DIRECT_URL: postgresql://${POSTGRES_USER:-tesla}:${POSTGRES_PASSWORD:-tesla}@db:5432/${POSTGRES_DB:-tesla_pool}?schema=public
+      # Local-demo default only; a real deployment sets its own long random secret.
+      JWT_SECRET: ${JWT_SECRET:-local-docker-secret-change-me}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      PORT: 3000
+    ports:
+      - '3000:3000'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s # migrate + seed run before the API listens
 
 volumes:
   db_data:

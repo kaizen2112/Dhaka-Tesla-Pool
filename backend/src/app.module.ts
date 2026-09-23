@@ -7,6 +7,7 @@ import { ApiExceptionFilter } from './common/filters/api-exception.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AuthModule } from './modules/auth/auth.module';
+import { HealthModule } from './modules/health/health.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { RidesModule } from './modules/rides/rides.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
@@ -29,6 +30,7 @@ import { PrismaModule } from './prisma/prisma.module';
     VehiclesModule,
     RidesModule,
     PaymentsModule,
+    HealthModule,
   ],
   // Registered as APP_* providers (not in main.ts) so e2e tests get them too.
   // Guards run in this order: JWT first, then roles.
