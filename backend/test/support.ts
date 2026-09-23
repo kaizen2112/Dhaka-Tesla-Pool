@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { User } from '@prisma/client';
+import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -25,8 +26,21 @@ export async function resetDb(prisma: PrismaService) {
              "Pool", "RideRequest", "Vehicle", "User" CASCADE`;
 }
 
-// The story cast. Nobody logs in through the API here, so passwords are never checked.
+const WALLET_TOPUP_POYSHA = 50000; // same ৳500 as the seed
+
+// The story cast, plus Karim — a test-only second driver (docs/DATABASE.md). Nobody logs in
+// through the API here, so passwords are never checked.
 export async function createCast(prisma: PrismaService) {
+  const driver = (name: string, vehicleName: string, isOnline: boolean) =>
+    prisma.user.create({
+      data: {
+        name,
+        email: `${name.toLowerCase()}@teslapool.dev`,
+        passwordHash: 'unused-in-e2e',
+        role: 'DRIVER',
+        vehicle: { create: { name: vehicleName, capacity: 3, isOnline } },
+      },
+    });
   const passenger = (name: string) =>
     prisma.user.create({
       data: {
@@ -34,27 +48,40 @@ export async function createCast(prisma: PrismaService) {
         email: `${name.toLowerCase()}@teslapool.dev`,
         passwordHash: 'unused-in-e2e',
         role: 'PASSENGER',
+        wallet: {
+          create: {
+            balancePoysha: WALLET_TOPUP_POYSHA,
+            transactions: { create: { type: 'CREDIT', amountPoysha: WALLET_TOPUP_POYSHA } },
+          },
+        },
       },
     });
 
-  const jashim = await prisma.user.create({
-    data: {
-      name: 'Jashim',
-      email: 'jashim@teslapool.dev',
-      passwordHash: 'unused-in-e2e',
-      role: 'DRIVER',
-      vehicle: { create: { name: 'Bullet', capacity: 3, isOnline: true } },
-    },
-  });
   return {
-    jashim,
+    jashim: await driver('Jashim', 'Bullet', true),
+    karim: await driver('Karim', 'Toofan', true),
     nusrat: await passenger('Nusrat'),
     rafiq: await passenger('Rafiq'),
     shirin: await passenger('Shirin'),
   };
 }
 
+export type Cast = Awaited<ReturnType<typeof createCast>>;
+
 // A real JWT signed with the app's own secret, same as login would issue.
 export function bearer(app: INestApplication, user: Pick<User, 'id' | 'role'>) {
   return `Bearer ${app.get(JwtService).sign({ sub: user.id, role: user.role })}`;
+}
+
+// Supertest calls made as a given user.
+export function as(app: INestApplication<App>, user: Pick<User, 'id' | 'role'>) {
+  const server = app.getHttpServer();
+  const auth = bearer(app, user);
+  return {
+    get: (path: string) => request(server).get(path).set('Authorization', auth),
+    post: (path: string, body: object = {}) =>
+      request(server).post(path).set('Authorization', auth).send(body),
+    patch: (path: string, body: object = {}) =>
+      request(server).patch(path).set('Authorization', auth).send(body),
+  };
 }
