@@ -8,16 +8,20 @@ Built for the RoBenDevs internship challenge.
 
 | | |
 |---|---|
-| **Live demo** | _TODO: deployment URL_ |
+| **Live demo** | https://dhaka-tesla-pool.vercel.app (sign in with the [demo credentials](#demo-credentials)) |
+| **Live API** | https://dhaka-tesla-pool-api.onrender.com/health |
 | **Demo video (≤ 6 min)** | _TODO: Loom link_ |
 | **Run it locally** | `docker compose up --build` → http://localhost:3001 ([details](#quick-start-docker)) |
+
+> **First load can take ~50 s.** The API runs on Render's free tier, which sleeps after 15 minutes
+> idle. Open the [health URL](https://dhaka-tesla-pool-api.onrender.com/health) first to wake it.
 
 ---
 
 ## Contents
-[Problem](#problem) · [Features](#features) · [Screenshots](#screenshots) ·
+[Problem](#problem) · [Features](#features) · [User flow](#user-flow) · [Screenshots](#screenshots) ·
 [Architecture](#architecture) · [ERD](#database-erd) · [Tech stack](#tech-stack) ·
-[Structure](#project-structure) · [Setup](#getting-started) · [Tests](#tests) ·
+[Structure](#project-structure) · [Setup](#getting-started) · [Deployment](#deployment) · [Tests](#tests) ·
 [Demo credentials](#demo-credentials) · [API](#api-overview) ·
 [Matching & fares](#matching-and-fares) · [Key decisions](#key-decisions--trade-offs) ·
 [Concurrency](#concurrency-the-last-seat) · [Limitations](#known-limitations) ·
@@ -51,6 +55,75 @@ seat. The system has to:
 Every screen that fetches data has loading, empty and error states. Errors are shown by API
 error code, never by raw message.
 
+## User flow
+
+What each person can do, the choices along the way, and how the shared pool connects them.
+Diamonds are decisions: the user's, or the system's (matching, capacity).
+
+```mermaid
+flowchart TD
+    Open(["Open the app"]) --> Signed{"Signed in?"}
+    Signed -- "no" --> Auth["Sign in, or register<br/>as Passenger or Driver"]
+    Auth --> Role{"Role"}
+    Signed -- "yes" --> Role
+    Role -- "Passenger" --> Book
+    Role -- "Driver" --> HasCar
+
+    subgraph P["Passenger — Nusrat, Rafiq, Shirin"]
+        Book["Request a ride<br/>pickup · destination · seats"] --> Fits{"An open pool fits?<br/>free seats · pickup ≤ 2 km<br/>nobody rides more than 2 km extra"}
+        Fits -- "yes: auto-join" --> Joined["Matched into the pool<br/>estimate shown"]
+        Fits -- "no" --> Waiting["Waiting<br/>reason shown + solo estimate"]
+        Waiting -- "cancel" --> Cancelled(["Cancelled"])
+        Joined --> Track["Track live, refreshed every 5 s<br/>status · co-riders · seats · own fare"]
+        Track -- "cancel before the trip starts<br/>seat goes back to the pool" --> Cancelled
+        Arrived["Trip completed<br/>final fare + breakdown"] --> Pay{"Pay how?"}
+        Pay -- "TeslaPay" --> Wallet["Wallet debited<br/>receipt + balance"]
+        Pay -- "Cash" --> Cash["Recorded as paid in cash"]
+        Wallet --> Again["Request another ride"]
+        Cash --> Again
+    end
+
+    subgraph D["Driver — Jashim / Bullet"]
+        HasCar{"Has a Tesla?"} -- "no" --> AddCar["Add Tesla<br/>name + seats, fixed"]
+        HasCar -- "yes" --> Online
+        AddCar --> Online["Go online"]
+        Online --> List["Waiting passengers<br/>that fit the free seats"]
+        List -- "Accept" --> Active{"Active pool?"}
+        Active -- "none" --> Create["Create a pool from this request"]
+        Active -- "open + route fits" --> Add["Add the request to the pool"]
+        Active -- "closed or doesn't fit" --> Refused["Refused with the reason<br/>request keeps waiting"]
+        Controls["Trip page<br/>only the next valid step"]
+        Online -- "go offline<br/>refused during a trip" --> Offline(["Offline"])
+    end
+
+    subgraph Pool["Pool — the shared trip on one Tesla"]
+        M["MATCHED<br/>open: more riders can join"] -- "Mark arrived" --> DA["DRIVER_ARRIVED<br/>closed to new riders"]
+        DA -- "Start" --> S["STARTED<br/>no more cancelling"]
+        S -- "Complete" --> C["COMPLETED<br/>each fare finalized"]
+        M -- "last rider cancels" --> PC(["CANCELLED"])
+        DA -- "last rider cancels" --> PC
+    end
+
+    Create --> M
+    Add --> M
+    Joined -. "rides in" .-> M
+    Waiting -. "a driver accepts" .-> Joined
+    M -. "status changes show on" .-> Track
+    Create --> Controls
+    Controls -. "drives" .-> DA
+    C --> Arrived
+```
+
+| Choice | Who | Options |
+|---|---|---|
+| Account type | anyone | Passenger or Driver (at registration) |
+| Trip | passenger | Pickup and destination from 9 Dhaka zones; 1–7 seats |
+| Stay or leave | passenger | Cancel while waiting, matched or driver arrived; not once started |
+| Payment | passenger | TeslaPay wallet or cash, after the trip completes |
+| Availability | driver | Online or offline (offline is refused during an active trip) |
+| Who to take | driver | Accept any waiting request that fits; the first accept creates the pool, later ones add to it |
+| Trip progress | driver | Arrived → start → complete, one step at a time |
+
 ## Screenshots
 
 _TODO: add screenshots or GIFs to `assets/screenshots/` and link them here._
@@ -76,7 +149,7 @@ flowchart LR
         Rides --> Prisma["Prisma Client"]
         Payments --> Prisma
     end
-    Prisma --> DB[("PostgreSQL 17")]
+    Prisma --> DB[("PostgreSQL 17<br/>Docker locally, Neon in production")]
 ```
 
 - **Controllers are thin**: validate the DTO, call one service method.
@@ -247,7 +320,7 @@ Next.js, a Node.js backend and a database were required by the brief. Everything
 | Auth | **JWT** (Bearer) + **bcryptjs** | Sessions, Auth.js, argon2 | Stateless and simple; Bearer header means no CSRF. bcryptjs is pure JS, so there's no native build in Alpine | Production: httpOnly cookie + refresh tokens, argon2 |
 | Tests | **Jest 30** + supertest against a **real Postgres** | Vitest, mocked Prisma | Locking and constraints can only be proven on a real database | — |
 | Containers | **Docker Compose** (multi-stage images) | Kubernetes | One command runs db + API + web on any machine | Multi-service production: ECS / Kubernetes |
-| Hosting | _TODO (commit 24)_ | | Free tier only, per the brief | |
+| Hosting | **Vercel** (web) · **Render** (API, Docker) · **Neon** (Postgres) | Railway, Fly.io, Koyeb; Supabase for the DB | All free with no card. Render runs the same backend Dockerfile as compose; Vercel builds Next.js natively; Neon gives a pooled URL for the app and a direct one for migrations | Cold starts matter: a paid always-on instance, or one cloud provider (e.g. AWS) |
 
 ## Project structure
 
@@ -344,6 +417,31 @@ compose). `backend/.env.test` is committed on purpose: it only points at the loc
 - The seed is **idempotent** (upsert by email), so it's safe on every restart. It creates Jashim
   with Bullet (3 seats, offline), and Nusrat, Rafiq and Shirin, each with a ৳500 wallet. No rides
   are seeded.
+
+## Deployment
+
+Everything runs on free tiers, with no card needed.
+
+| Part | Host | Settings |
+|---|---|---|
+| Frontend | **Vercel** | Root directory `frontend`, Next.js preset. Env: `NEXT_PUBLIC_API_URL=https://dhaka-tesla-pool-api.onrender.com` |
+| API | **Render** web service (Docker) | Root directory `backend` (uses `backend/Dockerfile`), health check `/health`. Env: `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `FRONTEND_ORIGIN=https://dhaka-tesla-pool.vercel.app` |
+| Database | **Neon** Postgres (Singapore) | `DATABASE_URL` = the pooled connection string (`-pooler` host); `DIRECT_URL` = the direct one, used for migrations |
+
+- **Migrations and seed run by themselves.** Every Render start runs `prisma migrate deploy`, then the
+  idempotent seed, then the API. There's no manual database step.
+- **Cold start:** Render's free service sleeps after 15 minutes idle. The first request then takes
+  about 50 s while it wakes; after that it's fast. Neon also suspends when idle and wakes in about a second.
+- **CORS allows exactly one origin.** `FRONTEND_ORIGIN` must equal the Vercel production URL:
+  https, no trailing slash. A mismatch shows up in the app as "Can't reach the server".
+- **`NEXT_PUBLIC_API_URL` is baked in at build time.** After changing it, redeploy on Vercel.
+
+**Redeploying**
+- Pushing to the deployed branch redeploys both Render and Vercel automatically.
+- By hand: Render → Manual Deploy → Deploy latest commit; Vercel → Deployments → ⋯ → Redeploy.
+- Changing an environment variable needs a redeploy on both hosts. Render offers "Save, rebuild, and deploy".
+- A clean demo database: in Neon, reset the branch (or delete the ride, pool and history rows), then
+  redeploy on Render so it migrates and seeds again.
 
 ## Tests
 
