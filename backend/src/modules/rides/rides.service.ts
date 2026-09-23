@@ -5,12 +5,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, RideRequest, RideStatus } from '@prisma/client';
+import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import { DomainException } from '../../common/exceptions/domain.exception';
 import { ACTIVE_POOL_STATUSES } from '../../common/ride-status';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FareService } from '../fares/fare.service';
 import { CreateRideRequestDto } from './dto/create-ride-request.dto';
 import { MatchingService, MatchRejection, RiderTrip } from './matching.service';
+import { RideStateService } from './ride-state.service';
+
+// The driver-triggered pool steps (docs/ARCHITECTURE.md §4.3).
+export type PoolStep = 'DRIVER_ARRIVED' | 'STARTED' | 'COMPLETED';
 
 interface LockedPool {
   id: string;
@@ -82,6 +87,19 @@ function isUniqueViolation(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
+// Co-riders see each other's first name only (docs/API_SPEC.md → GET /pools/:id).
+function firstName(name: string) {
+  return name.split(' ')[0];
+}
+
+function stateChanged(): DomainException {
+  return new DomainException(
+    'INVALID_TRANSITION',
+    HttpStatus.CONFLICT,
+    'The ride changed while you were acting on it. Refresh and try again',
+  );
+}
+
 // The only writer of RideRequest / Pool / PoolMembership / RideStatusHistory
 // (docs/ARCHITECTURE.md §2). Every write happens inside one transaction.
 @Injectable()
@@ -90,6 +108,7 @@ export class RidesService {
     private readonly prisma: PrismaService,
     private readonly matching: MatchingService,
     private readonly fares: FareService,
+    private readonly rideState: RideStateService,
   ) {}
 
   // docs/ARCHITECTURE.md §4.1
@@ -253,7 +272,7 @@ export class RidesService {
         occupiedSeats: pool.occupiedSeats,
         coRiders: pool.memberships
           .filter((m) => m.passengerId !== passengerId)
-          .map((m) => m.passenger.name.split(' ')[0]),
+          .map((m) => firstName(m.passenger.name)),
       },
     };
   }
@@ -330,6 +349,245 @@ export class RidesService {
 
       return this.toDriverPoolView(tx, poolId);
     });
+  }
+
+  // docs/ARCHITECTURE.md §4.3 / §8 transitionPool: arrived, start, complete.
+  transitionPool(driverId: string, poolId: string, to: PoolStep) {
+    return this.prisma.$transaction(async (tx) => {
+      // Locks only the pool row (OF p), not the vehicle.
+      const [pool] = await tx.$queryRaw<{ id: string; status: RideStatus; driverId: string }[]>`
+        SELECT p.id, p.status, v."driverId"
+        FROM "Pool" p JOIN "Vehicle" v ON v.id = p."vehicleId"
+        WHERE p.id = ${poolId} FOR UPDATE OF p`;
+      if (!pool) throw new NotFoundException('Pool not found');
+      if (pool.driverId !== driverId) throw new ForbiddenException('This pool is not yours');
+
+      this.rideState.assertTransition('pool', pool.status, to);
+
+      const members = await tx.poolMembership.findMany({
+        where: { poolId, cancelledAt: null },
+        orderBy: { joinedAt: 'asc' },
+        include: { rideRequest: true },
+      });
+
+      await tx.pool.update({ where: { id: poolId }, data: { status: to } });
+
+      // Cascade: every active member's request moves with the pool. Cancelled members keep
+      // CANCELLED. All of them must be at the pool's old status, or something is out of sync.
+      const { count } = await tx.rideRequest.updateMany({
+        where: { id: { in: members.map((m) => m.rideRequestId) }, status: pool.status },
+        data: { status: to },
+      });
+      if (count !== members.length) throw stateChanged();
+
+      await tx.rideStatusHistory.createMany({
+        data: [
+          { poolId, fromStatus: pool.status, toStatus: to, actorUserId: driverId },
+          ...members.map((m) => ({
+            poolId,
+            rideRequestId: m.rideRequestId,
+            fromStatus: pool.status,
+            toStatus: to,
+            actorUserId: driverId,
+          })),
+        ],
+      });
+
+      // Final fares (docs/ARCHITECTURE.md §7): recomputed for every active member, with
+      // `shared` as the pool actually ended up. They never change after COMPLETED.
+      if (to === 'COMPLETED') {
+        const shared = members.length >= 2;
+        for (const m of members) {
+          const { farePoysha } = this.fares.calculate({ ...toTrip(m), shared });
+          await tx.poolMembership.update({ where: { id: m.id }, data: { farePoysha } });
+        }
+      }
+
+      return this.toDriverPoolView(tx, poolId);
+    });
+  }
+
+  // docs/ARCHITECTURE.md §4.4 / §8 cancelRequest. Allowed from REQUESTED, MATCHED,
+  // DRIVER_ARRIVED; never once the trip has STARTED.
+  async cancelRequest(passengerId: string, requestId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const request = await tx.rideRequest.findUnique({
+        where: { id: requestId },
+        include: { membership: true },
+      });
+      if (!request) throw new NotFoundException('Ride request not found');
+      if (request.passengerId !== passengerId) {
+        throw new ForbiddenException('This ride request is not yours');
+      }
+
+      const membership = request.membership?.cancelledAt ? null : request.membership;
+
+      if (!membership) {
+        // Still waiting. If it gets matched meanwhile, the conditional update changes 0 rows.
+        this.rideState.assertTransition('request', request.status, 'CANCELLED');
+        const { count } = await tx.rideRequest.updateMany({
+          where: { id: requestId, status: 'REQUESTED' },
+          data: { status: 'CANCELLED' },
+        });
+        if (count !== 1) throw stateChanged();
+        await tx.rideStatusHistory.create({
+          data: {
+            rideRequestId: requestId,
+            fromStatus: 'REQUESTED',
+            toStatus: 'CANCELLED',
+            actorUserId: passengerId,
+          },
+        });
+        return;
+      }
+
+      const [pool] = await tx.$queryRaw<{ id: string; status: RideStatus }[]>`
+        SELECT id, status FROM "Pool" WHERE id = ${membership.poolId} FOR UPDATE`;
+
+      // Re-read under the pool lock: every status change of a pooled request takes this lock,
+      // so this is the real current status (the read above may be stale).
+      const { status: from } = await tx.rideRequest.findUniqueOrThrow({
+        where: { id: requestId },
+        select: { status: true },
+      });
+      this.rideState.assertTransition('request', from, 'CANCELLED');
+
+      await tx.rideRequest.update({ where: { id: requestId }, data: { status: 'CANCELLED' } });
+      await tx.poolMembership.update({
+        where: { id: membership.id },
+        data: { cancelledAt: new Date() },
+      });
+      await tx.pool.update({
+        where: { id: pool.id },
+        data: { occupiedSeats: { decrement: membership.seats } },
+      });
+      await tx.rideStatusHistory.create({
+        data: {
+          rideRequestId: requestId,
+          poolId: pool.id,
+          fromStatus: from,
+          toStatus: 'CANCELLED',
+          actorUserId: passengerId,
+        },
+      });
+
+      // Last active member gone → the pool itself is cancelled.
+      const remaining = await tx.poolMembership.count({
+        where: { poolId: pool.id, cancelledAt: null },
+      });
+      if (remaining === 0) {
+        this.rideState.assertTransition('pool', pool.status, 'CANCELLED');
+        await tx.pool.update({ where: { id: pool.id }, data: { status: 'CANCELLED' } });
+        await tx.rideStatusHistory.create({
+          data: {
+            poolId: pool.id,
+            fromStatus: pool.status,
+            toStatus: 'CANCELLED',
+            actorUserId: passengerId,
+          },
+        });
+      }
+    });
+
+    return this.getRequest(passengerId, requestId);
+  }
+
+  // GET /pools/:id — the driver sees everything; a passenger sees the pool, co-riders' first
+  // names and only their own membership + fare.
+  async getPool(viewer: AuthUser, poolId: string) {
+    const { pool, isDriver } = await this.loadPoolForViewer(viewer, poolId);
+    if (isDriver) return this.toDriverPoolView(this.prisma, poolId);
+
+    // A passenger who cancelled and re-booked into the same pool has two memberships; show the latest.
+    const own = pool.memberships.filter((m) => m.passengerId === viewer.id).at(-1)!;
+    return {
+      id: pool.id,
+      status: pool.status,
+      vehicleName: pool.vehicle.name,
+      driverName: pool.vehicle.driver.name,
+      capacity: pool.capacity,
+      occupiedSeats: pool.occupiedSeats,
+      coRiders: pool.memberships
+        .filter((m) => !m.cancelledAt && m.passengerId !== viewer.id)
+        .map((m) => firstName(m.passenger.name)),
+      myMembership: {
+        id: own.id,
+        rideRequestId: own.rideRequestId,
+        seats: own.seats,
+        farePoysha: own.farePoysha,
+        cancelledAt: own.cancelledAt,
+        paymentMethod: own.paymentMethod,
+        paidAt: own.paidAt,
+      },
+    };
+  }
+
+  // Driver: every row with this poolId. Passenger: pool-level rows + their own request's rows
+  // (including the "created" row from before the request joined the pool).
+  async getPoolHistory(viewer: AuthUser, poolId: string) {
+    const { pool, isDriver } = await this.loadPoolForViewer(viewer, poolId);
+    const ownRequestIds = pool.memberships
+      .filter((m) => m.passengerId === viewer.id)
+      .map((m) => m.rideRequestId);
+
+    return this.prisma.rideStatusHistory.findMany({
+      where: isDriver
+        ? { poolId }
+        : { OR: [{ poolId, rideRequestId: null }, { rideRequestId: { in: ownRequestIds } }] },
+      orderBy: { changedAt: 'asc' },
+      select: {
+        id: true,
+        rideRequestId: true,
+        fromStatus: true,
+        toStatus: true,
+        changedAt: true,
+        actor: { select: { name: true } },
+      },
+    });
+  }
+
+  // Per-passenger breakdown recomputed by FareService; `farePoysha` is the stored figure
+  // (the estimate until COMPLETED, then final). Driver: every active member; passenger: own.
+  async getPoolFares(viewer: AuthUser, poolId: string) {
+    const { pool, isDriver } = await this.loadPoolForViewer(viewer, poolId);
+    const active = pool.memberships.filter((m) => !m.cancelledAt);
+    const shared = active.length >= 2;
+    const visible = isDriver ? active : active.filter((m) => m.passengerId === viewer.id);
+
+    return {
+      poolStatus: pool.status,
+      final: pool.status === 'COMPLETED',
+      fares: visible.map((m) => ({
+        membershipId: m.id,
+        passengerName: m.passenger.name,
+        pickupZone: m.rideRequest.pickupZone,
+        destinationZone: m.rideRequest.destinationZone,
+        farePoysha: m.farePoysha,
+        breakdown: this.fares.calculate({ ...toTrip(m), shared }),
+      })),
+    };
+  }
+
+  // Who may see a pool (docs/API_SPEC.md → Authorization): its driver, or a passenger who has
+  // or had a membership in it. Anyone else — including other drivers — gets 403.
+  private async loadPoolForViewer(viewer: AuthUser, poolId: string) {
+    const pool = await this.prisma.pool.findUnique({
+      where: { id: poolId },
+      include: {
+        vehicle: { include: { driver: true } },
+        memberships: {
+          orderBy: { joinedAt: 'asc' },
+          include: { passenger: true, rideRequest: true },
+        },
+      },
+    });
+    if (!pool) throw new NotFoundException('Pool not found');
+
+    const isDriver = pool.vehicle.driverId === viewer.id;
+    if (!isDriver && !pool.memberships.some((m) => m.passengerId === viewer.id)) {
+      throw new ForbiddenException('You are not part of this pool');
+    }
+    return { pool, isDriver };
   }
 
   // The "no active pool" branch of acceptRequest: this request becomes the pool's anchor.

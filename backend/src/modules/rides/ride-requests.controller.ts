@@ -39,4 +39,10 @@ export class RideRequestsController {
   accept(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.rides.acceptRequest(user.id, id);
   }
+
+  @Patch(':id/cancel')
+  @Roles('PASSENGER')
+  cancel(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.rides.cancelRequest(user.id, id);
+  }
 }
