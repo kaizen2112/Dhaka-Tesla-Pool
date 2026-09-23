@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, RideRequest, RideStatus } from '@prisma/client';
 import { DomainException } from '../../common/exceptions/domain.exception';
+import { ACTIVE_POOL_STATUSES } from '../../common/ride-status';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FareService } from '../fares/fare.service';
 import { CreateRideRequestDto } from './dto/create-ride-request.dto';
@@ -18,6 +19,37 @@ interface LockedPool {
   occupiedSeats: number;
   pickupZone: string;
 }
+
+interface LockedVehicle {
+  id: string;
+  capacity: number;
+  isOnline: boolean;
+}
+
+// How a failed join surfaces on driver accept (docs/API_SPEC.md → error table).
+// POOL_NOT_OPEN means the pool moved past MATCHED between the vehicle lock and the pool lock.
+const ACCEPT_REJECTIONS: Record<MatchRejection, { code: string; status: HttpStatus; message: string }> = {
+  POOL_NOT_OPEN: {
+    code: 'ACTIVE_POOL_EXISTS',
+    status: HttpStatus.CONFLICT,
+    message: 'Your current pool is no longer taking passengers',
+  },
+  CAPACITY_EXCEEDED: {
+    code: 'CAPACITY_EXCEEDED',
+    status: HttpStatus.CONFLICT,
+    message: 'Not enough free seats for this request',
+  },
+  PICKUP_TOO_FAR: {
+    code: 'PICKUP_TOO_FAR',
+    status: HttpStatus.UNPROCESSABLE_ENTITY,
+    message: "This pickup is more than 2 km from your pool's pickup",
+  },
+  EXTRA_DISTANCE_TOO_HIGH: {
+    code: 'EXTRA_DISTANCE_TOO_HIGH',
+    status: HttpStatus.UNPROCESSABLE_ENTITY,
+    message: 'Adding this passenger would take someone more than 2 km out of their way',
+  },
+};
 
 type JoinOutcome =
   | { joined: true; farePoysha: number; score: number }
@@ -226,8 +258,180 @@ export class RidesService {
     };
   }
 
+  // Waiting requests the driver's vehicle could take right now (docs/API_SPEC.md →
+  // GET /ride-requests/pending). Not filtered by distance: vehicles have no location.
+  async listPending(driverId: string) {
+    const vehicle = await this.prisma.vehicle.findUnique({
+      where: { driverId },
+      include: { pools: { where: { status: { in: ACTIVE_POOL_STATUSES } }, take: 1 } },
+    });
+    if (!vehicle) throw new NotFoundException('You have no vehicle yet');
+    if (!vehicle.isOnline) return [];
+
+    const activePool = vehicle.pools[0];
+    if (activePool && activePool.status !== 'MATCHED') return [];
+    const freeSeats = activePool
+      ? activePool.capacity - activePool.occupiedSeats
+      : vehicle.capacity;
+
+    const requests = await this.prisma.rideRequest.findMany({
+      where: { status: 'REQUESTED', seats: { lte: freeSeats } },
+      orderBy: { createdAt: 'asc' },
+      include: { passenger: true },
+    });
+    return requests.map((r) => ({
+      id: r.id,
+      passengerName: r.passenger.name,
+      pickupZone: r.pickupZone,
+      destinationZone: r.destinationZone,
+      seats: r.seats,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  // docs/ARCHITECTURE.md §4.2 / §8 acceptRequest. One transaction, lock order
+  // Vehicle → Pool → RideRequest (the same order everywhere, so no deadlocks).
+  acceptRequest(driverId: string, requestId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      // The vehicle lock is what makes "one active pool per vehicle" safe: when a pool is about
+      // to be created there's no pool row to lock yet. Two accept clicks run one after the
+      // other, and the second sees the first one's pool and joins it.
+      const [vehicle] = await tx.$queryRaw<LockedVehicle[]>`
+        SELECT id, capacity, "isOnline" FROM "Vehicle" WHERE "driverId" = ${driverId} FOR UPDATE`;
+      if (!vehicle) throw new NotFoundException('You have no vehicle yet');
+      if (!vehicle.isOnline) {
+        throw new DomainException('VEHICLE_OFFLINE', HttpStatus.CONFLICT, 'Go online before accepting rides');
+      }
+
+      const request = await tx.rideRequest.findUnique({ where: { id: requestId } });
+      if (!request) throw new NotFoundException('Ride request not found');
+
+      const activePool = await tx.pool.findFirst({
+        where: { vehicleId: vehicle.id, status: { in: ACTIVE_POOL_STATUSES } },
+      });
+
+      let poolId: string;
+      if (!activePool) {
+        poolId = await this.createPoolFromRequest(tx, vehicle, request, driverId);
+      } else if (activePool.status === 'MATCHED') {
+        const outcome = await this.joinPool(tx, request, activePool.id, driverId);
+        if (!outcome.joined) {
+          const { code, status, message } = ACCEPT_REJECTIONS[outcome.reason];
+          throw new DomainException(code, status, message);
+        }
+        poolId = activePool.id;
+      } else {
+        throw new DomainException(
+          'ACTIVE_POOL_EXISTS',
+          HttpStatus.CONFLICT,
+          'Finish your current trip before accepting new passengers',
+        );
+      }
+
+      return this.toDriverPoolView(tx, poolId);
+    });
+  }
+
+  // The "no active pool" branch of acceptRequest: this request becomes the pool's anchor.
+  private async createPoolFromRequest(
+    tx: Prisma.TransactionClient,
+    vehicle: LockedVehicle,
+    request: RideRequest,
+    driverId: string,
+  ): Promise<string> {
+    if (request.seats > vehicle.capacity) {
+      throw new DomainException(
+        'CAPACITY_EXCEEDED',
+        HttpStatus.CONFLICT,
+        'This request needs more seats than your vehicle has',
+      );
+    }
+
+    const { count } = await tx.rideRequest.updateMany({
+      where: { id: request.id, status: 'REQUESTED' },
+      data: { status: 'MATCHED' },
+    });
+    if (count !== 1) {
+      throw new DomainException(
+        'INVALID_TRANSITION',
+        HttpStatus.CONFLICT,
+        'This ride request is no longer waiting',
+      );
+    }
+
+    const { farePoysha } = this.fares.calculate({
+      pickupZone: request.pickupZone,
+      destinationZone: request.destinationZone,
+      seats: request.seats,
+      shared: false, // alone in the pool for now; finalized at complete (docs/ARCHITECTURE.md §7)
+    });
+
+    const pool = await tx.pool.create({
+      data: {
+        vehicleId: vehicle.id,
+        pickupZone: request.pickupZone,
+        destinationZone: request.destinationZone,
+        capacity: vehicle.capacity, // snapshot, so the CHECK constraint needs no cross-table trigger
+        occupiedSeats: request.seats,
+        status: 'MATCHED',
+        memberships: {
+          create: {
+            rideRequestId: request.id,
+            passengerId: request.passengerId,
+            seats: request.seats,
+            farePoysha,
+          },
+        },
+        history: { create: { fromStatus: null, toStatus: 'MATCHED', actorUserId: driverId } },
+      },
+    });
+    await tx.rideStatusHistory.create({
+      data: {
+        rideRequestId: request.id,
+        poolId: pool.id,
+        fromStatus: 'REQUESTED',
+        toStatus: 'MATCHED',
+        actorUserId: driverId,
+      },
+    });
+    return pool.id;
+  }
+
+  // Driver view of a pool (docs/API_SPEC.md → GET /pools/:id): every active member and fare.
+  private async toDriverPoolView(tx: Prisma.TransactionClient, poolId: string) {
+    const pool = await tx.pool.findUniqueOrThrow({
+      where: { id: poolId },
+      include: {
+        vehicle: true,
+        memberships: {
+          where: { cancelledAt: null },
+          orderBy: { joinedAt: 'asc' },
+          include: { passenger: true, rideRequest: true },
+        },
+      },
+    });
+    return {
+      id: pool.id,
+      status: pool.status,
+      vehicleName: pool.vehicle.name,
+      pickupZone: pool.pickupZone,
+      destinationZone: pool.destinationZone,
+      capacity: pool.capacity,
+      occupiedSeats: pool.occupiedSeats,
+      members: pool.memberships.map((m) => ({
+        membershipId: m.id,
+        rideRequestId: m.rideRequestId,
+        passengerName: m.passenger.name,
+        pickupZone: m.rideRequest.pickupZone,
+        destinationZone: m.rideRequest.destinationZone,
+        seats: m.seats,
+        farePoysha: m.farePoysha,
+      })),
+    };
+  }
+
   // docs/ARCHITECTURE.md §8 joinPool. Takes the caller's transaction: auto-join opens one per
-  // attempt, and driver accept (commit 11) calls it inside its own.
+  // attempt, and acceptRequest calls it inside its own (after the vehicle lock).
   private async joinPool(
     tx: Prisma.TransactionClient,
     request: RideRequest,
