@@ -1,7 +1,10 @@
 @import "tailwindcss";
 
-/* Monochrome tokens — docs/UI_GUIDE.md §2. Components use these names only. */
+/* Monochrome tokens — docs/UI_GUIDE.md §2. Components use these names only.
+   The theme is the `data-theme` attribute on <html>: set before first paint by the script in
+   app/layout.tsx (saved choice, else the OS setting) and flipped by the ThemeToggle. */
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --surface: #fafafa;
   --foreground: #0a0a0a;
@@ -23,26 +26,25 @@
   --rider-7: #8c7a00;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --surface: #141414;
-    --foreground: #ededed;
-    --muted: #a3a3a3;
-    --border: #262626;
-    --border-strong: #404040;
-    --primary: #ededed;
-    --primary-foreground: #0a0a0a;
-    --danger: #f87171;
-    --accent: #60a5fa;
-    --rider-1: #4aa3df;
-    --rider-2: #e69f00;
-    --rider-3: #19b48a;
-    --rider-4: #d98cb8;
-    --rider-5: #e8743b;
-    --rider-6: #7cc6f0;
-    --rider-7: #f0e442;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --surface: #141414;
+  --foreground: #ededed;
+  --muted: #a3a3a3;
+  --border: #262626;
+  --border-strong: #404040;
+  --primary: #ededed;
+  --primary-foreground: #0a0a0a;
+  --danger: #f87171;
+  --accent: #60a5fa;
+  --rider-1: #4aa3df;
+  --rider-2: #e69f00;
+  --rider-3: #19b48a;
+  --rider-4: #d98cb8;
+  --rider-5: #e8743b;
+  --rider-6: #7cc6f0;
+  --rider-7: #f0e442;
 }
 
 @theme inline {

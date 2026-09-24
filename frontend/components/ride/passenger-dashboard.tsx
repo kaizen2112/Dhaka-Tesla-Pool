@@ -165,7 +165,7 @@ function PassengerRouteMap({
     .join(" · ");
 
   return (
-    <div className="grid items-start gap-4 md:grid-cols-[24rem_1fr]">
+    <div className="grid items-start gap-4 lg:grid-cols-[24rem_1fr]">
       <ZoneMap
         label={`Route map: ${route(request.pickupZone, request.destinationZone)}`}
         description={`The Tesla makes ${stops.length} stops. Your pickup is stop ${stops[from]?.order}, your drop-off stop ${stops[to]?.order}.`}

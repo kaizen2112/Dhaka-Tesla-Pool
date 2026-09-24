@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, PasswordInput, Select } from "@/components/ui/field";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { api } from "@/lib/api-client";
 import { errorMessage } from "@/lib/errors";
 import { homeFor, saveSession, useSession } from "@/lib/session";
@@ -59,6 +60,10 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-4 py-12">
+      {/* Signed-out pages have no top bar, so the theme switch sits in the corner. */}
+      <div className="fixed top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="flex flex-col gap-6 rounded-xl border border-border bg-surface p-6 sm:p-8">
         <div className="flex flex-col gap-1">
           <p className="text-xs text-muted">Dhaka Tesla Pool</p>

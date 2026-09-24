@@ -64,7 +64,7 @@ export function DriverRouteMap({
   ];
 
   return (
-    <div className="grid items-start gap-4 md:grid-cols-[24rem_1fr]">
+    <div className="grid items-start gap-4 lg:grid-cols-[24rem_1fr]">
       <ZoneMap
         label={pool ? `Route map: ${stops.length} stops` : waiting.length ? "Waiting passengers on the map" : "Map of the zones and roads"}
         description={[

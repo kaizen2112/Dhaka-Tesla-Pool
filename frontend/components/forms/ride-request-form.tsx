@@ -129,7 +129,7 @@ function RequestPreview({ pickup, destination, seats }: { pickup: string; destin
   ];
 
   return (
-    <div className="grid items-start gap-4 md:grid-cols-[24rem_1fr]">
+    <div className="grid items-start gap-4 lg:grid-cols-[24rem_1fr]">
       <ZoneMap
         label={ready ? `Preview: ${route(pickup, destination)}` : `Preview: pickup at ${zoneName(pickup)}`}
         description="Your pickup and destination, joined by the road route the fare is priced on."
