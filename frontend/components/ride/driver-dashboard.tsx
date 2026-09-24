@@ -7,21 +7,29 @@ import { SeatsIndicator } from "@/components/ride/seats-indicator";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
+import { StatStrip } from "@/components/ui/stat-strip";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useApi } from "@/hooks/use-api";
 import { ApiError, api } from "@/lib/api-client";
 import { errorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/format";
-import type { MyVehicle, PendingRequest } from "@/lib/types";
+import type { DriverTrip, MyVehicle, PendingRequest } from "@/lib/types";
 import { route } from "@/lib/zones";
 
 const POLL_MS = 5000;
+
+// Trips started today (local time) that didn't end up cancelled.
+function tripsToday(trips: DriverTrip[]) {
+  const today = new Date().toDateString();
+  return trips.filter((t) => t.status !== "CANCELLED" && new Date(t.createdAt).toDateString() === today).length;
+}
 
 export function DriverDashboard() {
   const vehicle = useApi<MyVehicle>("/vehicles/me", POLL_MS);
   const v = vehicle.data;
   // The API returns [] for an offline vehicle anyway; skipping the call just saves a request.
   const pending = useApi<PendingRequest[]>(v?.isOnline ? "/ride-requests/pending" : null, POLL_MS);
+  const trips = useApi<DriverTrip[]>(v ? "/pools/me" : null, POLL_MS);
 
   if (!v) {
     if (vehicle.error instanceof ApiError && vehicle.error.code === "NOT_FOUND") {
@@ -41,8 +49,18 @@ export function DriverDashboard() {
     pending.reload();
   };
 
+  const pool = v.activePool;
   return (
     <>
+      <StatStrip
+        stats={[
+          { label: "Status", value: v.isOnline ? "Online" : "Offline" },
+          { label: "Seats free", value: pool ? pool.capacity - pool.occupiedSeats : v.capacity },
+          // "—" rather than 0 when the number isn't known (offline, or still loading).
+          { label: "Waiting", value: v.isOnline && pending.data ? pending.data.length : "—" },
+          { label: "Trips today", value: trips.data ? tripsToday(trips.data) : "—" },
+        ]}
+      />
       <VehicleCard vehicle={v} onChange={refresh} />
       {v.activePool && <ActivePoolCard pool={v.activePool} />}
       <PendingCard vehicle={v} pending={pending} onAccepted={refresh} />

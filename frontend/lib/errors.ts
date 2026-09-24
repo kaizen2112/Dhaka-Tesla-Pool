@@ -39,6 +39,9 @@ const WAIT_REASONS: Record<WaitReason, string> = {
     "Sharing the open Tesla would take someone more than 2 km out of their way.",
 };
 
-export function waitReason(reason: WaitReason) {
+// null (GET /ride-requests/:id → waiting.reason): an open pool fits now, but requests only
+// auto-join when they're created, so it's that pool's driver who has to accept.
+export function waitReason(reason: WaitReason | null) {
+  if (!reason) return "An open Tesla fits your trip. Waiting for its driver to accept you.";
   return `${WAIT_REASONS[reason]} You'll be matched when a driver accepts your request.`;
 }

@@ -73,6 +73,8 @@ export interface MyRideRequest extends RideRequest {
 
 // GET /ride-requests/:id and PATCH /ride-requests/:id/cancel
 export interface RideRequestDetail {
+  // Only while REQUESTED. reason null = an open pool fits; waiting for its driver to accept.
+  waiting: { estimatedFarePoysha: number; reason: WaitReason | null } | null;
   request: RideRequest;
   membership: Membership | null;
   pool: {

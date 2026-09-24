@@ -3,15 +3,21 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Fare, FareBreakdown, shownFare } from "@/components/ride/fare";
+import { LifecycleStepper } from "@/components/ride/lifecycle-stepper";
 import { PaymentPanel } from "@/components/ride/payment-panel";
-import { SeatsIndicator } from "@/components/ride/seats-indicator";
+import { initialOf, SeatMap, type Seat } from "@/components/ride/seat-map";
+import { StatusTimeline } from "@/components/ride/status-timeline";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Toast } from "@/components/ui/toast";
 import { useApi } from "@/hooks/use-api";
+import { useChangeToast } from "@/hooks/use-change-toast";
 import { api } from "@/lib/api-client";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage, waitReason } from "@/lib/errors";
+import { formatTaka } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import type { MyRideRequest, PoolFares, RideRequestDetail, RideStatus } from "@/lib/types";
 import { route, zoneName } from "@/lib/zones";
 
@@ -64,10 +70,10 @@ export function PassengerDashboard() {
   );
 }
 
-function statusLine({ request, pool }: RideRequestDetail) {
+function statusLine({ request, pool, waiting }: RideRequestDetail) {
   switch (request.status) {
     case "REQUESTED":
-      return "Waiting for a driver to accept your request.";
+      return waiting ? waitReason(waiting.reason) : "Waiting for a driver to accept your request.";
     case "MATCHED":
       return `${pool?.driverName} is on the way to ${zoneName(request.pickupZone)}.`;
     case "DRIVER_ARRIVED":
@@ -81,9 +87,56 @@ function statusLine({ request, pool }: RideRequestDetail) {
   }
 }
 
+// What changed between two polls, told to the passenger. Their own status first, then who
+// got in or out of the Tesla.
+interface RideSnapshot {
+  status: RideStatus;
+  coRiders: string[];
+}
+
+function rideChange(before: RideSnapshot, after: RideSnapshot, driver = "Your driver") {
+  if (before.status !== after.status) {
+    switch (after.status) {
+      case "MATCHED":
+        return `${driver} accepted your ride`;
+      case "DRIVER_ARRIVED":
+        return `${driver} has arrived at the pickup`;
+      case "STARTED":
+        return "Your trip has started";
+      case "COMPLETED":
+        return "You've arrived. Time to pay";
+      case "CANCELLED":
+        return "Your ride was cancelled";
+      default:
+        return null;
+    }
+  }
+  const joined = after.coRiders.find((n) => !before.coRiders.includes(n));
+  if (joined) return `${joined} joined your pool`;
+  const left = before.coRiders.find((n) => !after.coRiders.includes(n));
+  return left ? `${left} left the pool` : null;
+}
+
+// Your seats filled (you), co-riders outlined with their initial. Co-riders' seat counts aren't
+// in the passenger view, so any extra seats they booked show as taken but unlabelled.
+function passengerSeats(ride: RideRequestDetail, me: string): Seat[] {
+  const { request, pool } = ride;
+  if (!pool) return [];
+  const seats: Seat[] = [
+    ...Array.from({ length: request.seats }, () => ({ initial: initialOf(me || "You"), name: "You", emphasis: true })),
+    ...pool.coRiders.map((name) => ({ initial: initialOf(name), name })),
+  ];
+  while (seats.length < pool.occupiedSeats) seats.push({ initial: "", name: "Taken" });
+  return seats.slice(0, pool.capacity);
+}
+
 function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () => void }) {
-  const { request, membership, pool } = ride;
+  const { request, membership, pool, waiting } = ride;
+  const me = useSession()?.user.name ?? "";
   const final = request.status === "COMPLETED";
+  const toast = useChangeToast({ status: request.status, coRiders: pool?.coRiders ?? [] }, (before, after) =>
+    rideChange(before, after, pool?.driverName),
+  );
   // A passenger sees only their own entry (API_SPEC → GET /pools/:id/fares).
   const fares = useApi<PoolFares>(pool ? `/pools/${pool.id}/fares` : null, POLL_MS);
   const ownFare = fares.data?.fares[0];
@@ -109,6 +162,10 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
   return (
     <Card title={route(request.pickupZone, request.destinationZone)} aside={<StatusBadge status={request.status} />}>
       <p className="text-muted">{statusLine(ride)}</p>
+      <LifecycleStepper status={request.status} />
+
+      {/* Waiting: no pool yet, so the solo estimate from the API (docs/API_SPEC.md → waiting). */}
+      {request.status === "REQUESTED" && waiting && <Fare poysha={waiting.estimatedFarePoysha} final={false} />}
 
       {pool && (
         <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-2">
@@ -118,7 +175,7 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
           </dd>
           <dt className="text-muted">Seats</dt>
           <dd>
-            <SeatsIndicator occupied={pool.occupiedSeats} capacity={pool.capacity} />
+            <SeatMap capacity={pool.capacity} seats={passengerSeats(ride, me)} />
           </dd>
           <dt className="text-muted">Riding with</dt>
           <dd>{pool.coRiders.length ? pool.coRiders.join(", ") : "Just you so far"}</dd>
@@ -132,6 +189,12 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
       {membership && (
         <div className="flex flex-col gap-3">
           <Fare poysha={ownFare ? shownFare(ownFare, final) : membership.farePoysha} final={final} />
+          {ownFare && ownFare.breakdown.discountPoysha > 0 && (
+            <p className="text-sm font-medium">
+              Saved <span className="font-mono tabular-nums">{formatTaka(ownFare.breakdown.discountPoysha)}</span> by
+              pooling
+            </p>
+          )}
           {ownFare && <FareBreakdown breakdown={ownFare.breakdown} />}
         </div>
       )}
@@ -152,6 +215,13 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
           {cancelling ? "Cancelling…" : "Cancel ride"}
         </Button>
       )}
+
+      {/* The passenger's history view: pool rows + their own request's rows, so every
+          request row is theirs. */}
+      {pool && (
+        <StatusTimeline poolId={pool.id} names={{ viewer: me, driver: pool.driverName, rider: () => me }} />
+      )}
+      <Toast message={toast} />
     </Card>
   );
 }

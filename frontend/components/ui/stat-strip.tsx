@@ -1,12 +1,18 @@
 import type { ReactNode } from "react";
 
-// A row of headline numbers above a list (docs/UI_GUIDE.md §7): label small, value big and mono.
-// One row at every width (2–3 stats fit at 375px), so the 1px dividers never leave a gap.
+// Full class names so Tailwind generates them. Four stats go 2×2 on phones; the grid is always
+// full, so the 1px dividers (the border colour showing through gap-px) never leave a hole.
+const COLUMNS: Record<number, string> = {
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-2 sm:grid-cols-4",
+};
+
+// A row of headline numbers above a list (docs/UI_GUIDE.md §9): label small, value big and mono.
 export function StatStrip({ stats }: { stats: { label: string; value: ReactNode }[] }) {
   return (
     <dl
-      className="grid gap-px overflow-hidden rounded-xl border border-border bg-border"
-      style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}
+      className={`grid gap-px overflow-hidden rounded-xl border border-border bg-border ${COLUMNS[stats.length] ?? "grid-cols-2"}`}
     >
       {stats.map(({ label, value }) => (
         <div key={label} className="flex flex-col gap-1 bg-background p-3 sm:p-4">

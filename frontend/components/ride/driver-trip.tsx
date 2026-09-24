@@ -3,15 +3,20 @@
 import Link from "next/link";
 import { useState } from "react";
 import { FareBreakdown, shownFare } from "@/components/ride/fare";
-import { SeatsIndicator } from "@/components/ride/seats-indicator";
+import { LifecycleStepper } from "@/components/ride/lifecycle-stepper";
+import { initialOf, SeatMap } from "@/components/ride/seat-map";
+import { StatusTimeline } from "@/components/ride/status-timeline";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Toast } from "@/components/ui/toast";
 import { useApi } from "@/hooks/use-api";
+import { useChangeToast } from "@/hooks/use-change-toast";
 import { api } from "@/lib/api-client";
 import { errorMessage } from "@/lib/errors";
 import { formatTaka } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import type { DriverPool, PoolFares, RideStatus } from "@/lib/types";
 import { route } from "@/lib/zones";
 
@@ -32,12 +37,45 @@ const STATUS_LINE: Record<RideStatus, string> = {
   CANCELLED: "Every passenger cancelled, so this trip was cancelled.",
 };
 
+interface TripSnapshot {
+  status: RideStatus;
+  riders: string[];
+}
+
+// Passengers joining or cancelling happen without the driver doing anything, so they're the
+// main thing to announce. The driver's own steps get a short confirmation.
+function tripChange(before: TripSnapshot, after: TripSnapshot) {
+  if (before.status !== after.status) {
+    switch (after.status) {
+      case "DRIVER_ARRIVED":
+        return "Marked arrived. The pool is closed to new passengers";
+      case "STARTED":
+        return "Trip started";
+      case "COMPLETED":
+        return "Trip completed. Fares are final";
+      case "CANCELLED":
+        return "Every passenger cancelled, so the trip was cancelled";
+      default:
+        return null;
+    }
+  }
+  const joined = after.riders.find((n) => !before.riders.includes(n));
+  if (joined) return `${joined} joined your pool`;
+  const left = before.riders.find((n) => !after.riders.includes(n));
+  return left ? `${left} cancelled their ride` : null;
+}
+
 export function DriverTrip({ poolId }: { poolId: string }) {
   const { data: pool, error, reload } = useApi<DriverPool>(`/pools/${poolId}`, 5000);
   // The driver gets every active passenger's breakdown (API_SPEC → GET /pools/:id/fares).
   const fares = useApi<PoolFares>(`/pools/${poolId}/fares`, 5000);
+  const me = useSession()?.user.name ?? "";
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const toast = useChangeToast(
+    pool && { status: pool.status, riders: pool.members.map((m) => m.passengerName) },
+    tripChange,
+  );
 
   if (!pool) {
     if (error) return <ErrorState error={error} onRetry={reload} />;
@@ -65,16 +103,23 @@ export function DriverTrip({ poolId }: { poolId: string }) {
   return (
     <Card title={route(pool.pickupZone, pool.destinationZone)} aside={<StatusBadge status={pool.status} />}>
       <p className="text-muted">{STATUS_LINE[pool.status]}</p>
+      <LifecycleStepper status={pool.status} />
 
       <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-2">
         <dt className="text-muted">Tesla</dt>
         <dd>{pool.vehicleName}</dd>
         <dt className="text-muted">Seats</dt>
-        <dd className="flex flex-wrap items-center gap-x-3">
-          <SeatsIndicator occupied={pool.occupiedSeats} capacity={pool.capacity} />
-          <span className="font-mono text-xs tabular-nums text-muted">
-            {pool.capacity - pool.occupiedSeats} free
-          </span>
+        <dd>
+          <SeatMap
+            capacity={pool.capacity}
+            seats={pool.members.flatMap((m) =>
+              Array.from({ length: m.seats }, () => ({
+                initial: initialOf(m.passengerName),
+                name: m.passengerName,
+                emphasis: true,
+              })),
+            )}
+          />
         </dd>
       </dl>
 
@@ -133,6 +178,18 @@ export function DriverTrip({ poolId }: { poolId: string }) {
           Back to dashboard
         </Link>
       )}
+
+      {/* The driver sees every row; members are the active riders, so a cancelled rider's
+          accept reads "a passenger". */}
+      <StatusTimeline
+        poolId={pool.id}
+        names={{
+          viewer: me,
+          driver: me,
+          rider: (id) => pool.members.find((m) => m.rideRequestId === id)?.passengerName,
+        }}
+      />
+      <Toast message={toast} />
     </Card>
   );
 }
