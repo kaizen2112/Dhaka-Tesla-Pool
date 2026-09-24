@@ -35,9 +35,10 @@ describe('MatchingService', () => {
     ['same destination', [NUSRAT], trip('BANANI', 'MOHAKHALI'), 0.0, true],
     ['nearer destination', [trip('BANANI', 'FARMGATE')], trip('BANANI', 'MOHAKHALI'), 0.0, true],
     ['farther destination', [NUSRAT], trip('BANANI', 'FARMGATE'), 0.0, true],
-    ['farther, same corridor', [NUSRAT], trip('BANANI', 'DHANMONDI'), 0.05, true],
+    // Dhanmondi's road runs through Mohakhali, so Nusrat's drop-off is on the way.
+    ['farther, same corridor', [NUSRAT], trip('BANANI', 'DHANMONDI'), 0.0, true],
     ['slightly different route (Rafiq)', [NUSRAT], RAFIQ, 1.63, true],
-    ['opposite direction', [NUSRAT], trip('BANANI', 'UTTARA'), 3.59, false],
+    ['opposite direction', [NUSRAT], trip('BANANI', 'UTTARA'), 3.94, false],
     ['third passenger Shirin', [NUSRAT, RAFIQ], trip('BANANI', 'FARMGATE'), 1.63, true],
     ['third passenger to Gulshan 2', [NUSRAT, RAFIQ], trip('BANANI', 'GULSHAN_2'), 2.25, false],
   ];
@@ -97,7 +98,7 @@ describe('MatchingService', () => {
       const { extraKm } = service.planRoute('BANANI', riders);
       expect(extraKm.nusrat).toBeCloseTo(1.632, 2);
       expect(extraKm.rafiq).toBe(0);
-      expect(extraKm.shirin).toBeCloseTo(1.634, 2); // 1.794 + 1.810 + 2.377 − 4.347
+      expect(extraKm.shirin).toBeCloseTo(1.633, 2); // 1.794 + 1.810 + 2.377 − 4.348 (road via Mohakhali)
     });
 
     it('uses the same drop-off order canJoinPool judged the pool by', () => {

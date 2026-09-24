@@ -40,7 +40,7 @@ describe("Bullet's last seat", () => {
       .expect(200);
     expect(pool.body.occupiedSeats).toBe(2);
 
-    // Either one alone would match (worst extra 1.63 km / 1.20 km), so capacity is the only
+    // Either one alone would match (worst extra 1.63 km each), so capacity is the only
     // reason one of them can lose.
     const [nusratRes, shirinRes] = await Promise.all([
       request(server)
