@@ -11,6 +11,16 @@
   --primary: #0a0a0a;
   --primary-foreground: #fafafa;
   --danger: #dc2626;
+  /* The one exception to monochrome (docs/UI_GUIDE.md §2): "you" and your route on the map. */
+  --accent: #2563eb;
+  /* Driver's map only: one per passenger, Okabe–Ito (colour-blind-safe), darkened for white. */
+  --rider-1: #0072b2;
+  --rider-2: #e69f00;
+  --rider-3: #009e73;
+  --rider-4: #cc79a7;
+  --rider-5: #d55e00;
+  --rider-6: #56b4e9;
+  --rider-7: #8c7a00;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,6 +34,14 @@
     --primary: #ededed;
     --primary-foreground: #0a0a0a;
     --danger: #f87171;
+    --accent: #60a5fa;
+    --rider-1: #4aa3df;
+    --rider-2: #e69f00;
+    --rider-3: #19b48a;
+    --rider-4: #d98cb8;
+    --rider-5: #e8743b;
+    --rider-6: #7cc6f0;
+    --rider-7: #f0e442;
   }
 }
 
@@ -37,6 +55,7 @@
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-danger: var(--danger);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

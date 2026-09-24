@@ -47,10 +47,13 @@ seat. The system has to:
 | Request a ride: pickup zone, destination zone, seats | Go online / offline (can't go offline mid-trip) |
 | Auto-join a compatible pool, or wait — with the reason shown | See waiting requests that fit the free seats; accept them |
 | Live ride status (5 s polling): waiting → matched → in progress → completed | Accepting creates the pool, or adds to the open pool |
-| Co-riders' first names, seats used (`● ● ○ 2 / 3`) | Mark arrived → start → complete (only the valid next step) |
+| Co-riders' first names, seat map (`[N] [R] [ ]`) | Mark arrived → start → complete (only the valid next step) |
 | Own fare with breakdown, labelled *estimate* until *final* | Every passenger's own fare + breakdown |
-| Cancel before the trip starts (seat goes back to the pool) | |
-| Pay by cash or simulated **TeslaPay** wallet; ride history | |
+| Cancel before the trip starts (seat goes back to the pool) | Trip history with totals (trips, passengers, fares) |
+| Pay by cash or simulated **TeslaPay** wallet; wallet + ride history pages | Summary strip: online, seats free, waiting, trips today |
+| **Zone map**: the Tesla's stops, your path vs your direct line, "+1.6 km · saved ৳18" | **Zone map**: every passenger's path in its own colour; tap a name to highlight it |
+| Live fare + distance preview while choosing zones | Seat map with initials, ride stepper, readable timeline |
+| Ride stepper, seat map, timeline, and toasts ("Rafiq joined your pool") | Toasts when passengers join or cancel |
 
 Every screen that fetches data has loading, empty and error states. Errors are shown by API
 error code, never by raw message.
@@ -337,7 +340,7 @@ Dhaka-Tesla-Pool/
 │   │   └── modules/
 │   │       ├── auth/           # register, login, me
 │   │       ├── vehicles/       # create, online/offline
-│   │       ├── location/       # Dhaka zones + Haversine
+│   │       ├── location/       # Dhaka zones + road network, shortest paths
 │   │       ├── fares/          # FareService (pure)
 │   │       ├── rides/          # RidesService (writer), matching + state machine (pure), 2 controllers
 │   │       ├── payments/       # cash / wallet, /wallet/me
@@ -523,8 +526,11 @@ the client sends.
 ## Matching and fares
 
 **Geography.** Nine fixed Dhaka zones (Banani, Gulshan 1/2, Mohakhali, Farmgate, Dhanmondi,
-Mirpur 10, Uttara, Bashundhara), each with a lat/lng. Distance is Haversine, i.e. a straight line.
-There's no maps API, as the brief suggests.
+Mirpur 10, Uttara, Bashundhara), each with a lat/lng, joined by 14 hand-picked **roads**
+(e.g. Dhanmondi–Farmgate, Farmgate–Mohakhali, Mohakhali–Gulshan 1). A road's length is the
+straight line between its ends. A trip's distance is the shortest chain of roads, so Dhanmondi →
+Gulshan 1 goes via Farmgate and Mohakhali (6.232 km). Fares, matching and the map all use this
+one distance. There's no maps API, as the brief suggests.
 
 **Matching rule: no passenger rides more than 2 km further than they would alone.**
 `MatchingService.canJoinPool` checks, in this order:
@@ -540,7 +546,7 @@ The score is `pickup distance + worst extra`; the lowest wins.
 |---|---|---|
 | Rafiq Banani → Gulshan 1 (drop Rafiq first) | 1.63 km | ✅ match |
 | Shirin Banani → Farmgate (pool = Nusrat + Rafiq) | 1.63 km | ✅ match |
-| Banani → Uttara (opposite direction) | 3.59 km | ❌ `EXTRA_DISTANCE_TOO_HIGH` |
+| Banani → Uttara (opposite direction) | 3.94 km | ❌ `EXTRA_DISTANCE_TOO_HIGH` |
 
 **Fare:** `fare = (base + distanceCharge − poolDiscount) × seats`, computed per passenger from
 **their own** pickup → destination.
@@ -551,7 +557,7 @@ The score is `pickup distance + worst extra`; the lowest wins.
 |---|---|---|---|---|---|---|
 | Nusrat | 1.972 | 2.0 | ৳50.00 | ৳40.00 | −৳18.00 | **৳72.00** |
 | Rafiq | 1.794 | 1.8 | ৳50.00 | ৳36.00 | −৳17.20 | **৳68.80** |
-| Shirin | 4.347 | 4.3 | ৳50.00 | ৳86.00 | −৳27.20 | **৳108.80** |
+| Shirin | 4.348 | 4.3 | ৳50.00 | ৳86.00 | −৳27.20 | **৳108.80** |
 
 The fare is stored at join as an estimate, and recomputed for everyone inside the `complete`
 transaction as the final fare. The UI shows the estimate for who is in the pool *right now*,
@@ -610,7 +616,8 @@ database refuse. The race test runs 10 times against a real Postgres.
 
 ## Known limitations
 
-- Distances are straight lines between zone centres, not roads. Only 9 zones.
+- Distances follow 14 hand-picked roads between zone centres (shortest path), not real road
+  geometry or traffic. Only 9 zones.
 - Pickups are visited in join order; `DRIVER_ARRIVED` covers the whole pool (the first pickup).
 - Vehicles have no live location, so the pending list isn't filtered by distance.
 - Waiting requests never expire; there's no background re-matching.

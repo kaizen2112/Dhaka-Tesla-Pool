@@ -1,17 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Fare } from "@/components/ride/fare";
 import { SeatsIndicator } from "@/components/ride/seats-indicator";
+import { ZoneMap } from "@/components/ride/zone-map";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/field";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { useApi } from "@/hooks/use-api";
 import { ApiError, api } from "@/lib/api-client";
 import { errorMessage, waitReason } from "@/lib/errors";
-import type { CreateRideResponse } from "@/lib/types";
-import { ZONE_NAMES, route } from "@/lib/zones";
+import { formatTaka } from "@/lib/format";
+import type { CreateRideResponse, FareEstimate } from "@/lib/types";
+import { ZONE_NAMES, route, zoneName } from "@/lib/zones";
 
 const ZONE_OPTIONS = Object.entries(ZONE_NAMES).map(([code, name]) => (
   <option key={code} value={code}>
@@ -24,6 +27,17 @@ export function RideRequestForm() {
   const [error, setError] = useState<unknown>(null);
   const [sameZone, setSameZone] = useState(false);
   const [result, setResult] = useState<CreateRideResponse | null>(null);
+  // Mirrors the (uncontrolled) fields for the live preview; the submit still reads the form.
+  const [choice, setChoice] = useState({ pickup: "BANANI", destination: "", seats: 1 });
+
+  function onFormChange(event: FormEvent<HTMLFormElement>) {
+    const form = new FormData(event.currentTarget);
+    setChoice({
+      pickup: String(form.get("pickupZone")),
+      destination: String(form.get("destinationZone") ?? ""),
+      seats: Number(form.get("seats")),
+    });
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -51,7 +65,7 @@ export function RideRequestForm() {
   if (result) return <RequestResult result={result} />;
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+    <form onSubmit={onSubmit} onChange={onFormChange} className="flex flex-col gap-4">
       <Select label="Pickup" name="pickupZone" defaultValue="BANANI" required>
         {ZONE_OPTIONS}
       </Select>
@@ -75,6 +89,8 @@ export function RideRequestForm() {
         ))}
       </Select>
 
+      <RequestPreview {...choice} />
+
       {error !== null && (
         <p role="alert" className="text-sm text-danger">
           {errorMessage(error)}{" "}
@@ -89,6 +105,56 @@ export function RideRequestForm() {
         {pending ? "Requesting…" : "Request ride"}
       </Button>
     </form>
+  );
+}
+
+// Live preview while choosing (docs/UI_UX_PLAN.md §4.1): the direct line on the zone map, and
+// the solo quote from GET /fares/estimate. Debounced, and purely informational — if the quote
+// fails, the form still works and the booking response has the fare anyway.
+function RequestPreview({ pickup, destination, seats }: { pickup: string; destination: string; seats: number }) {
+  const ready = destination !== "" && destination !== pickup;
+  const wanted = ready
+    ? `/fares/estimate?pickupZone=${pickup}&destinationZone=${destination}&seats=${seats}`
+    : null;
+  const [path, setPath] = useState<string | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => setPath(wanted), 300);
+    return () => clearTimeout(timer);
+  }, [wanted]);
+  const estimate = useApi<FareEstimate>(path);
+
+  const stops = [
+    { order: 1, zone: pickup, type: "PICKUP" as const, highlight: true },
+    ...(ready ? [{ order: 2, zone: destination, type: "DROPOFF" as const, highlight: true }] : []),
+  ];
+
+  return (
+    <div className="grid items-start gap-4 md:grid-cols-[24rem_1fr]">
+      <ZoneMap
+        label={ready ? `Preview: ${route(pickup, destination)}` : `Preview: pickup at ${zoneName(pickup)}`}
+        description="Your pickup and destination, joined by the road route the fare is priced on."
+        stops={stops}
+        paths={ready ? [{ key: "direct", zones: [pickup, destination], color: "var(--accent)", width: 4 }] : []}
+      />
+      <p className="text-sm text-muted" aria-live="polite">
+        {!ready ? (
+          "Choose a destination to see the distance and fare."
+        ) : estimate.data && path === wanted ? (
+          <>
+            <span className="font-mono tabular-nums text-foreground">{estimate.data.directKm.toFixed(1)} km</span>{" "}
+            by road · about{" "}
+            <span className="font-mono tabular-nums text-foreground">
+              {formatTaka(estimate.data.breakdown.farePoysha)}
+            </span>{" "}
+            alone. Sharing a Tesla lowers it.
+          </>
+        ) : estimate.error && path === wanted ? (
+          "Couldn't get a fare estimate. You can still request the ride."
+        ) : (
+          "Estimating…"
+        )}
+      </p>
+    </div>
   );
 }
 

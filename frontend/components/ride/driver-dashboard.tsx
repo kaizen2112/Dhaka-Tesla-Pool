@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { VehicleForm } from "@/components/forms/vehicle-form";
+import { DriverRouteMap } from "@/components/ride/driver-route-map";
 import { SeatsIndicator } from "@/components/ride/seats-indicator";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, Skeleton } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiError, api } from "@/lib/api-client";
 import { errorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/format";
-import type { DriverTrip, MyVehicle, PendingRequest } from "@/lib/types";
+import type { DriverPool, DriverTrip, MyVehicle, PendingRequest } from "@/lib/types";
 import { route } from "@/lib/zones";
 
 const POLL_MS = 5000;
@@ -30,6 +31,8 @@ export function DriverDashboard() {
   // The API returns [] for an offline vehicle anyway; skipping the call just saves a request.
   const pending = useApi<PendingRequest[]>(v?.isOnline ? "/ride-requests/pending" : null, POLL_MS);
   const trips = useApi<DriverTrip[]>(v ? "/pools/me" : null, POLL_MS);
+  // The active trip's stops and riders, for the map.
+  const poolDetail = useApi<DriverPool>(v?.activePool ? `/pools/${v.activePool.id}` : null, POLL_MS);
 
   if (!v) {
     if (vehicle.error instanceof ApiError && vehicle.error.code === "NOT_FOUND") {
@@ -61,6 +64,13 @@ export function DriverDashboard() {
           { label: "Trips today", value: trips.data ? tripsToday(trips.data) : "—" },
         ]}
       />
+      <Card title="Map" aside={<span className="text-xs text-muted">Solid: on your trip · dashed: waiting</span>}>
+        {pool && !poolDetail.data ? (
+          <Skeleton className="mx-auto aspect-square w-full max-w-sm" />
+        ) : (
+          <DriverRouteMap pool={poolDetail.data} waiting={v.isOnline ? (pending.data ?? []) : []} />
+        )}
+      </Card>
       <VehicleCard vehicle={v} onChange={refresh} />
       {v.activePool && <ActivePoolCard pool={v.activePool} />}
       <PendingCard vehicle={v} pending={pending} onAccepted={refresh} />

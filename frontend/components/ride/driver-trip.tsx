@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { DriverRouteMap, riderColor } from "@/components/ride/driver-route-map";
 import { FareBreakdown, shownFare } from "@/components/ride/fare";
 import { LifecycleStepper } from "@/components/ride/lifecycle-stepper";
 import { initialOf, SeatMap } from "@/components/ride/seat-map";
@@ -72,6 +73,9 @@ export function DriverTrip({ poolId }: { poolId: string }) {
   const me = useSession()?.user.name ?? "";
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Which passenger's path is highlighted: hover/focus wins, a tap pins it (touch has no hover).
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<string | null>(null);
   const toast = useChangeToast(
     pool && { status: pool.status, riders: pool.members.map((m) => m.passengerName) },
     tripChange,
@@ -84,6 +88,7 @@ export function DriverTrip({ poolId }: { poolId: string }) {
 
   const step = NEXT_STEP[pool.status];
   const final = pool.status === "COMPLETED";
+  const highlighted = hovered ?? pinned;
 
   async function advance(path: string) {
     if (path === "complete" && !confirm("Complete the trip? This sets everyone's final fare.")) return;
@@ -123,6 +128,10 @@ export function DriverTrip({ poolId }: { poolId: string }) {
         </dd>
       </dl>
 
+      {/* Each passenger's path in their own colour (docs/UI_UX_PLAN.md §4.1). The passenger list
+          below is the legend, so the map takes its highlight from there. */}
+      <DriverRouteMap pool={pool} highlighted={highlighted} />
+
       <div className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between">
           <h3 className="text-sm font-medium">Passengers</h3>
@@ -132,15 +141,35 @@ export function DriverTrip({ poolId }: { poolId: string }) {
           <p className="text-muted">No passengers.</p>
         ) : (
           <ul className="divide-y divide-border border-y border-border">
-            {pool.members.map((m) => {
+            {pool.members.map((m, i) => {
               const fare = fares.data?.fares.find((f) => f.membershipId === m.membershipId);
               return (
-                <li key={m.membershipId} className="flex flex-col gap-2 py-3">
+                <li
+                  key={m.membershipId}
+                  onMouseEnter={() => setHovered(m.membershipId)}
+                  onMouseLeave={() => setHovered(null)}
+                  className="flex flex-col gap-2 py-3"
+                >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex flex-col gap-0.5">
-                      <span className="font-medium">{m.passengerName}</span>
+                      {/* The legend control: focus or hover highlights this path, a tap pins it. */}
+                      <button
+                        type="button"
+                        aria-pressed={pinned === m.membershipId}
+                        onClick={() => setPinned((p) => (p === m.membershipId ? null : m.membershipId))}
+                        onFocus={() => setHovered(m.membershipId)}
+                        onBlur={() => setHovered(null)}
+                        className="flex items-center gap-2 self-start rounded-md font-medium focus-visible:outline-2 focus-visible:outline-foreground"
+                      >
+                        <span aria-hidden className="h-1 w-4 rounded-full" style={{ background: riderColor(i) }} />
+                        {m.passengerName}
+                        <span className="sr-only"> — highlight on the map</span>
+                      </button>
                       <span className="text-xs text-muted">
-                        {route(m.pickupZone, m.destinationZone)} · {m.seats} {m.seats === 1 ? "seat" : "seats"}
+                        {route(m.pickupZone, m.destinationZone)} · {m.seats} {m.seats === 1 ? "seat" : "seats"} ·{" "}
+                        <span className="font-mono tabular-nums">
+                          {m.extraKm >= 0.05 ? `+${m.extraKm.toFixed(1)} km` : "no detour"}
+                        </span>
                       </span>
                     </div>
                     {/* Each passenger's own fare, never a split of a pool total (ARCHITECTURE §7). */}

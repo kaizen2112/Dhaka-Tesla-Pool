@@ -115,7 +115,16 @@ export interface DriverPool {
     destinationZone: string;
     seats: number;
     farePoysha: number;
+    extraKm: number; // km ridden beyond their direct trip
   }[];
+  stops: (RouteStop & { riders: { membershipId: string; passengerName: string }[] })[];
+}
+
+// The order the Tesla visits zones (docs/API_SPEC.md → Route stops).
+export interface RouteStop {
+  order: number;
+  zone: string;
+  type: "PICKUP" | "DROPOFF";
 }
 
 // GET /pools/:id as a member passenger
@@ -127,7 +136,8 @@ export interface PassengerPool {
   capacity: number;
   occupiedSeats: number;
   coRiders: string[];
-  myMembership: Membership & { rideRequestId: string };
+  myMembership: Membership & { rideRequestId: string; extraKm: number | null };
+  stops: (RouteStop & { mine: boolean })[]; // co-riders' stops, but not their names
 }
 
 // GET /pools/:id/history — oldest first
@@ -225,4 +235,10 @@ export interface DriverTrip {
     paidAt: string | null;
     cancelledAt: string | null;
   }[];
+}
+
+// GET /fares/estimate — the solo quote before booking
+export interface FareEstimate {
+  directKm: number;
+  breakdown: FareBreakdown;
 }
