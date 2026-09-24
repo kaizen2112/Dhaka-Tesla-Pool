@@ -25,6 +25,23 @@ export type MatchRejection =
   | 'PICKUP_TOO_FAR'
   | 'EXTRA_DISTANCE_TOO_HIGH';
 
+// A rider with an id, so a route plan can say who boards / leaves at each stop.
+export interface RouteRider extends RiderTrip {
+  id: string;
+}
+
+export interface RouteStop {
+  order: number; // 1-based
+  zone: string;
+  type: 'PICKUP' | 'DROPOFF';
+  riderIds: string[];
+}
+
+export interface RoutePlan {
+  stops: RouteStop[];
+  extraKm: Record<string, number>; // rider id → km ridden beyond their direct trip
+}
+
 export type MatchResult =
   | { matched: true; score: number; maxExtraKm: number; dropOffOrder: string[] }
   | { matched: false; reason: MatchRejection; maxExtraKm?: number };
@@ -48,7 +65,8 @@ export class MatchingService {
       return { matched: false, reason: 'PICKUP_TOO_FAR' };
     }
 
-    const best = this.bestDropOffOrder(pool.pickupZone, [...pool.members, request]);
+    const riders = [...pool.members, request];
+    const best = this.bestDropOffOrder(pool.pickupZone, riders);
     if (best.maxExtraKm > MAX_EXTRA_KM) {
       return { matched: false, reason: 'EXTRA_DISTANCE_TOO_HIGH', maxExtraKm: best.maxExtraKm };
     }
@@ -57,27 +75,59 @@ export class MatchingService {
       matched: true,
       score: pickupDistanceKm + best.maxExtraKm,
       maxExtraKm: best.maxExtraKm,
-      dropOffOrder: best.dropOffOrder,
+      dropOffOrder: best.order.map((i) => riders[i].destinationZone),
+    };
+  }
+
+  // The route the pool's riders take, for display (the map, the driver's stop list): the same
+  // stops and drop-off order canJoinPool judged the pool by, plus each rider's extra km.
+  planRoute(anchorPickup: string, riders: RouteRider[]): RoutePlan {
+    const best = this.bestDropOffOrder(anchorPickup, riders);
+    const raw: Omit<RouteStop, 'order'>[] = [
+      // Empty unless it merges with the first pickup: the anchor rider may have cancelled.
+      { zone: anchorPickup, type: 'PICKUP', riderIds: [] },
+      ...riders.map((r) => ({ zone: r.pickupZone, type: 'PICKUP' as const, riderIds: [r.id] })),
+      ...best.order.map((i) => ({
+        zone: riders[i].destinationZone,
+        type: 'DROPOFF' as const,
+        riderIds: [riders[i].id],
+      })),
+    ];
+
+    // Back-to-back stops in the same zone are one stop (everyone boarding at Banani).
+    const stops: RouteStop[] = [];
+    for (const stop of raw) {
+      const last = stops.at(-1);
+      if (last && last.zone === stop.zone && last.type === stop.type) {
+        last.riderIds.push(...stop.riderIds);
+      } else {
+        stops.push({ order: stops.length + 1, ...stop, riderIds: [...stop.riderIds] });
+      }
+    }
+
+    return {
+      stops,
+      extraKm: Object.fromEntries(riders.map((r, i) => [r.id, best.extrasKm[i]])),
     };
   }
 
   // Tries every drop-off order and keeps the one with the smallest worst extra, so the
   // result doesn't depend on who booked first. At most capacity! orders (3! = 6 for Bullet).
   // ponytail: brute force is O(n!); fine up to the 7-seat cap, needs a heuristic beyond that.
+  // Returns rider indexes in drop-off order, and each rider's extra km (in rider order).
   private bestDropOffOrder(anchorPickup: string, riders: RiderTrip[]) {
-    let best = { maxExtraKm: Infinity, dropOffOrder: [] as string[] };
+    let best = { maxExtraKm: Infinity, order: [] as number[], extrasKm: [] as number[] };
     for (const order of permutations(riders.map((_, i) => i))) {
-      const worst = this.worstExtraKm(anchorPickup, riders, order);
-      if (worst < best.maxExtraKm) {
-        best = { maxExtraKm: worst, dropOffOrder: order.map((i) => riders[i].destinationZone) };
-      }
+      const extrasKm = this.extrasKm(anchorPickup, riders, order);
+      const worst = Math.max(0, ...extrasKm);
+      if (worst < best.maxExtraKm) best = { maxExtraKm: worst, order, extrasKm };
     }
     return best;
   }
 
   // Route: anchor pickup → each rider's pickup in join order → drop-offs in `order`.
   // A rider's extra = km actually ridden (their pickup → their drop-off) − their direct km.
-  private worstExtraKm(anchorPickup: string, riders: RiderTrip[], order: number[]): number {
+  private extrasKm(anchorPickup: string, riders: RiderTrip[], order: number[]): number[] {
     const stops = [
       anchorPickup,
       ...riders.map((r) => r.pickupZone),
@@ -88,15 +138,14 @@ export class MatchingService {
       cumulativeKm.push(cumulativeKm[s - 1] + this.location.getDistanceKm(stops[s - 1], stops[s]));
     }
 
-    let worst = 0;
-    riders.forEach((rider, i) => {
+    return riders.map((rider, i) => {
       const boardStop = 1 + i;
       const dropStop = 1 + riders.length + order.indexOf(i);
       const riddenKm = cumulativeKm[dropStop] - cumulativeKm[boardStop];
       const directKm = this.location.getDistanceKm(rider.pickupZone, rider.destinationZone);
-      worst = Math.max(worst, riddenKm - directKm);
+      // Never below 0 (a direct trip can come out a hair negative in floating point).
+      return Math.max(0, riddenKm - directKm);
     });
-    return worst;
   }
 }
 

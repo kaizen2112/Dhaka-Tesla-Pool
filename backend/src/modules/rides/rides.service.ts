@@ -60,9 +60,11 @@ type JoinOutcome =
   | { joined: true; farePoysha: number; score: number }
   | { joined: false; reason: MatchRejection };
 
+type WaitReason = MatchRejection | 'NO_OPEN_POOLS';
+
 type MatchSummary =
   | { matched: true; score: number }
-  | { matched: false; reason: MatchRejection | 'NO_OPEN_POOLS' };
+  | { matched: false; reason: WaitReason };
 
 // When nothing joins, report the rejection that got furthest through MatchingService's checks —
 // it best explains why the passenger is waiting. POOL_NOT_OPEN is internal-only (API_SPEC).
@@ -71,6 +73,15 @@ const WAIT_REASON_PRECEDENCE: MatchRejection[] = [
   'PICKUP_TOO_FAR',
   'CAPACITY_EXCEEDED',
 ];
+
+function waitReason(rejections: MatchRejection[]): WaitReason {
+  return WAIT_REASON_PRECEDENCE.find((r) => rejections.includes(r)) ?? 'NO_OPEN_POOLS';
+}
+
+// km for responses: 3 dp, the precision the docs' worked examples use.
+function roundKm(km: number) {
+  return Math.round(km * 1000) / 1000;
+}
 
 function toTrip(member: {
   seats: number;
@@ -153,32 +164,7 @@ export class RidesService {
       seats: request.seats,
     };
 
-    // Rank every open pool on an unlocked read. It can be stale; joinPool re-checks under lock.
-    const openPools = await this.prisma.pool.findMany({
-      where: { status: 'MATCHED' },
-      include: {
-        memberships: {
-          where: { cancelledAt: null },
-          orderBy: { joinedAt: 'asc' },
-          include: { rideRequest: true },
-        },
-      },
-    });
-
-    const rejections: MatchRejection[] = [];
-    const candidates: { poolId: string; score: number }[] = [];
-    for (const pool of openPools) {
-      const result = this.matching.canJoinPool(trip, {
-        status: pool.status,
-        capacity: pool.capacity,
-        occupiedSeats: pool.occupiedSeats,
-        pickupZone: pool.pickupZone,
-        members: pool.memberships.map(toTrip),
-      });
-      if (result.matched) candidates.push({ poolId: pool.id, score: result.score });
-      else rejections.push(result.reason);
-    }
-    candidates.sort((a, b) => a.score - b.score);
+    const { candidates, rejections } = await this.rankOpenPools(trip);
 
     // Best pool first, one transaction (one pool lock) per attempt. If someone took the last
     // seat since the ranking, the locked re-check fails and we move on to the next pool.
@@ -198,7 +184,7 @@ export class RidesService {
     const solo = this.fares.calculate({ ...trip, shared: false });
     return this.toCreateResponse(request.id, solo.farePoysha, {
       matched: false,
-      reason: WAIT_REASON_PRECEDENCE.find((r) => rejections.includes(r)) ?? 'NO_OPEN_POOLS',
+      reason: waitReason(rejections),
     });
   }
 
@@ -246,6 +232,7 @@ export class RidesService {
     const { membership } = request;
     const pool = membership?.pool;
     return {
+      waiting: request.status === 'REQUESTED' ? await this.waitingPreview(request) : null,
       request: {
         id: request.id,
         pickupZone: request.pickupZone,
@@ -275,6 +262,42 @@ export class RidesService {
           .map((m) => firstName(m.passenger.name)),
       },
     };
+  }
+
+  // GET /pools/me: the driver's trips, newest first, with every booking (cancelled ones too, so
+  // the history explains itself). Scoped through the vehicle, so another driver's never show.
+  async listMyPools(driverId: string) {
+    const pools = await this.prisma.pool.findMany({
+      where: { vehicle: { driverId } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      include: {
+        memberships: {
+          orderBy: { joinedAt: 'asc' },
+          include: { passenger: true, rideRequest: true },
+        },
+      },
+    });
+    return pools.map((pool) => ({
+      id: pool.id,
+      status: pool.status,
+      pickupZone: pool.pickupZone,
+      destinationZone: pool.destinationZone,
+      capacity: pool.capacity,
+      occupiedSeats: pool.occupiedSeats,
+      createdAt: pool.createdAt,
+      members: pool.memberships.map((m) => ({
+        membershipId: m.id,
+        passengerName: m.passenger.name,
+        pickupZone: m.rideRequest.pickupZone,
+        destinationZone: m.rideRequest.destinationZone,
+        seats: m.seats,
+        farePoysha: m.farePoysha,
+        paymentMethod: m.paymentMethod,
+        paidAt: m.paidAt,
+        cancelledAt: m.cancelledAt,
+      })),
+    }));
   }
 
   // Waiting requests the driver's vehicle could take right now (docs/API_SPEC.md →
@@ -500,6 +523,7 @@ export class RidesService {
 
     // A passenger who cancelled and re-booked into the same pool has two memberships; show the latest.
     const own = pool.memberships.filter((m) => m.passengerId === viewer.id).at(-1)!;
+    const plan = this.planRoute(pool.pickupZone, pool.memberships.filter((m) => !m.cancelledAt));
     return {
       id: pool.id,
       status: pool.status,
@@ -518,7 +542,15 @@ export class RidesService {
         cancelledAt: own.cancelledAt,
         paymentMethod: own.paymentMethod,
         paidAt: own.paidAt,
+        extraKm: own.id in plan.extraKm ? roundKm(plan.extraKm[own.id]) : null,
       },
+      // Where the Tesla stops, but not who else gets on or off there.
+      stops: plan.stops.map(({ order, zone, type, riderIds }) => ({
+        order,
+        zone,
+        type,
+        mine: riderIds.includes(own.id),
+      })),
     };
   }
 
@@ -566,6 +598,69 @@ export class RidesService {
         breakdown: this.fares.calculate({ ...toTrip(m), shared }),
       })),
     };
+  }
+
+  // Why a request is still waiting and what it would cost alone, re-derived on every read so the
+  // dashboard can explain it (not only the create response). Read-only: no locks, no writes.
+  // reason is null when an open pool would take it now: requests only auto-join when they're
+  // created (no background re-matching), so it waits for that pool's driver to accept it.
+  private async waitingPreview(request: RideRequest) {
+    const trip: RiderTrip = {
+      pickupZone: request.pickupZone,
+      destinationZone: request.destinationZone,
+      seats: request.seats,
+    };
+    const { candidates, rejections } = await this.rankOpenPools(trip);
+    return {
+      estimatedFarePoysha: this.fares.calculate({ ...trip, shared: false }).farePoysha,
+      reason: candidates.length > 0 ? null : waitReason(rejections),
+    };
+  }
+
+  // Rank every open pool on an unlocked read. It can be stale: joinPool re-checks under lock,
+  // and the waiting preview only reports it.
+  private async rankOpenPools(trip: RiderTrip) {
+    const openPools = await this.prisma.pool.findMany({
+      where: { status: 'MATCHED' },
+      include: {
+        memberships: {
+          where: { cancelledAt: null },
+          orderBy: { joinedAt: 'asc' },
+          include: { rideRequest: true },
+        },
+      },
+    });
+
+    const rejections: MatchRejection[] = [];
+    const candidates: { poolId: string; score: number }[] = [];
+    for (const pool of openPools) {
+      const result = this.matching.canJoinPool(trip, {
+        status: pool.status,
+        capacity: pool.capacity,
+        occupiedSeats: pool.occupiedSeats,
+        pickupZone: pool.pickupZone,
+        members: pool.memberships.map(toTrip),
+      });
+      if (result.matched) candidates.push({ poolId: pool.id, score: result.score });
+      else rejections.push(result.reason);
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    return { candidates, rejections };
+  }
+
+  // Stops and extra km for the pool's active members, keyed by membership id.
+  private planRoute(
+    anchorPickup: string,
+    active: {
+      id: string;
+      seats: number;
+      rideRequest: { pickupZone: string; destinationZone: string };
+    }[],
+  ) {
+    return this.matching.planRoute(
+      anchorPickup,
+      active.map((m) => ({ id: m.id, ...toTrip(m) })),
+    );
   }
 
   // Who may see a pool (docs/API_SPEC.md → Authorization): its driver, or a passenger who has
@@ -668,6 +763,8 @@ export class RidesService {
         },
       },
     });
+    const plan = this.planRoute(pool.pickupZone, pool.memberships);
+    const nameOf = new Map(pool.memberships.map((m) => [m.id, m.passenger.name]));
     return {
       id: pool.id,
       status: pool.status,
@@ -684,6 +781,13 @@ export class RidesService {
         destinationZone: m.rideRequest.destinationZone,
         seats: m.seats,
         farePoysha: m.farePoysha,
+        extraKm: roundKm(plan.extraKm[m.id]),
+      })),
+      stops: plan.stops.map(({ order, zone, type, riderIds }) => ({
+        order,
+        zone,
+        type,
+        riders: riderIds.map((id) => ({ membershipId: id, passengerName: nameOf.get(id)! })),
       })),
     };
   }

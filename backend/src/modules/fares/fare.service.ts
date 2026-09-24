@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { DomainException } from '../../common/exceptions/domain.exception';
 import { LocationService } from '../location/location.service';
 import {
   BASE_FARE_POYSHA,
@@ -57,6 +58,23 @@ export class FareService {
       // Derived, so the breakdown always adds up exactly to the fare.
       discountPoysha: basePoysha + distanceChargePoysha - farePoysha,
       farePoysha,
+    };
+  }
+
+  // GET /fares/estimate: the solo quote before booking, the same figure POST /ride-requests
+  // returns when nothing joins. Pooling can only lower it (docs/ARCHITECTURE.md §7).
+  estimate(trip: Omit<FareInput, 'shared'>) {
+    if (trip.pickupZone === trip.destinationZone) {
+      throw new DomainException(
+        'VALIDATION_ERROR',
+        HttpStatus.BAD_REQUEST,
+        'Pickup and destination must be different zones',
+      );
+    }
+    const directKm = this.location.getDistanceKm(trip.pickupZone, trip.destinationZone);
+    return {
+      directKm: Math.round(directKm * 1000) / 1000,
+      breakdown: this.calculate({ ...trip, shared: false }),
     };
   }
 }

@@ -74,4 +74,39 @@ describe('MatchingService', () => {
     const nusratJoinsRafiq = service.canJoinPool(NUSRAT, openPool([RAFIQ]));
     expect(rafiqJoinsNusrat.maxExtraKm).toBeCloseTo(nusratJoinsRafiq.maxExtraKm!, 10);
   });
+
+  describe('planRoute', () => {
+    // The canonical trip (docs/DATABASE.md → Seed data): all three board at Banani.
+    const riders = [
+      { id: 'nusrat', ...NUSRAT },
+      { id: 'rafiq', ...RAFIQ },
+      { id: 'shirin', ...trip('BANANI', 'FARMGATE') },
+    ];
+
+    it('boards everyone at Banani once, then drops Rafiq, Nusrat, Shirin', () => {
+      const { stops } = service.planRoute('BANANI', riders);
+      expect(stops).toEqual([
+        { order: 1, zone: 'BANANI', type: 'PICKUP', riderIds: ['nusrat', 'rafiq', 'shirin'] },
+        { order: 2, zone: 'GULSHAN_1', type: 'DROPOFF', riderIds: ['rafiq'] },
+        { order: 3, zone: 'MOHAKHALI', type: 'DROPOFF', riderIds: ['nusrat'] },
+        { order: 4, zone: 'FARMGATE', type: 'DROPOFF', riderIds: ['shirin'] },
+      ]);
+    });
+
+    it("reports each rider's extra km (ARCHITECTURE §6: Nusrat 1.632, Rafiq 0)", () => {
+      const { extraKm } = service.planRoute('BANANI', riders);
+      expect(extraKm.nusrat).toBeCloseTo(1.632, 2);
+      expect(extraKm.rafiq).toBe(0);
+      expect(extraKm.shirin).toBeCloseTo(1.634, 2); // 1.794 + 1.810 + 2.377 − 4.347
+    });
+
+    it('uses the same drop-off order canJoinPool judged the pool by', () => {
+      const joined = service.canJoinPool(riders[2], openPool([NUSRAT, RAFIQ]));
+      const { stops } = service.planRoute('BANANI', riders);
+      if (!joined.matched) throw new Error('Shirin should fit');
+      expect(stops.filter((s) => s.type === 'DROPOFF').map((s) => s.zone)).toEqual(
+        joined.dropOffOrder,
+      );
+    });
+  });
 });

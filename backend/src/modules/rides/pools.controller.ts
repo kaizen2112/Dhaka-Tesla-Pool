@@ -5,9 +5,16 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RidesService } from './rides.service';
 
 // Reads are open to both roles; RidesService decides who may see which pool (driver or member).
+// `me` must stay above `:id`, or Nest matches it as an id.
 @Controller('pools')
 export class PoolsController {
   constructor(private readonly rides: RidesService) {}
+
+  @Get('me')
+  @Roles('DRIVER')
+  listMine(@CurrentUser() user: AuthUser) {
+    return this.rides.listMyPools(user.id);
+  }
 
   @Get(':id')
   getOne(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
