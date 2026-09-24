@@ -18,7 +18,7 @@ type Size = keyof typeof SIZES;
 
 // Exported so a <Link> can look like a button (e.g. an empty state's next action).
 export function buttonClasses(variant: Variant = "primary", size: Size = "md", extra = "") {
-  return `inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:pointer-events-none disabled:opacity-50 ${VARIANTS[variant]} ${SIZES[size]} ${extra}`;
+  return `inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:pointer-events-none disabled:opacity-50 ${VARIANTS[variant]} ${SIZES[size]} ${extra}`;
 }
 
 export function Button({
