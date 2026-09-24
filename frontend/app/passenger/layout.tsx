@@ -1,15 +1,16 @@
 import type { ReactNode } from "react";
-import { AppShell } from "@/components/app-shell";
+import { AppShell, type Tab } from "@/components/app-shell";
 
-const LINKS = [
-  { href: "/passenger/dashboard", label: "Ride" },
-  { href: "/passenger/request", label: "Request" },
-  { href: "/passenger/history", label: "History" },
+const TABS: Tab[] = [
+  { href: "/passenger/dashboard", label: "Ride", icon: "ride" },
+  { href: "/passenger/request", label: "Request", icon: "request" },
+  { href: "/passenger/history", label: "History", icon: "history" },
+  { href: "/passenger/wallet", label: "Wallet", icon: "wallet" },
 ];
 
 export default function PassengerLayout({ children }: { children: ReactNode }) {
   return (
-    <AppShell role="PASSENGER" links={LINKS}>
+    <AppShell role="PASSENGER" tabs={TABS}>
       {children}
     </AppShell>
   );

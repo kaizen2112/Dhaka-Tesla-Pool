@@ -202,3 +202,25 @@ export interface Wallet {
     createdAt: string;
   }[];
 }
+
+// GET /pools/me — the driver's trips, newest first (max 20); includes cancelled bookings
+export interface DriverTrip {
+  id: string;
+  status: RideStatus;
+  pickupZone: string;
+  destinationZone: string;
+  capacity: number;
+  occupiedSeats: number;
+  createdAt: string;
+  members: {
+    membershipId: string;
+    passengerName: string;
+    pickupZone: string;
+    destinationZone: string;
+    seats: number;
+    farePoysha: number;
+    paymentMethod: PaymentMethod | null;
+    paidAt: string | null;
+    cancelledAt: string | null;
+  }[];
+}
