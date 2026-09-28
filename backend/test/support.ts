@@ -22,7 +22,7 @@ export async function resetDb(prisma: PrismaService) {
     throw new Error('Refusing to wipe a database whose name does not contain "_test"');
   }
   await prisma.$executeRaw`
-    TRUNCATE "WalletTransaction", "Wallet", "RideStatusHistory", "PoolMembership",
+    TRUNCATE "Rating", "Complaint", "WalletTransaction", "Wallet", "RideStatusHistory", "PoolMembership",
              "Pool", "RideRequest", "Vehicle", "User" CASCADE`;
 }
 

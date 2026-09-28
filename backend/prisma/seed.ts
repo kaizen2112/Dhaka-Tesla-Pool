@@ -63,7 +63,10 @@ async function main() {
     await ensureWalletCredited(passenger.id);
   }
 
-  console.log('Seed complete: Jashim/Bullet + Nusrat, Rafiq, Shirin (each ৳500 wallet).');
+  // The only admin. Nobody can register as one; admins have no wallet.
+  await upsertUser('tania@teslapool.dev', 'Tania', 'ADMIN');
+
+  console.log('Seed complete: Jashim/Bullet + Nusrat, Rafiq, Shirin (each ৳500 wallet) + Tania (admin).');
 }
 
 main()

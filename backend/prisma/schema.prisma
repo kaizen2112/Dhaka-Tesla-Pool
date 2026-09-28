@@ -13,6 +13,7 @@ datasource db {
 enum UserRole {
   PASSENGER
   DRIVER
+  ADMIN // seeded only; RegisterDto accepts PASSENGER | DRIVER
 }
 
 enum RideStatus {
@@ -34,19 +35,40 @@ enum WalletTransactionType {
   DEBIT
 }
 
+enum ComplaintCategory {
+  DANGEROUS_DRIVING
+  RUDE_BEHAVIOUR
+  VEHICLE_CONDITION
+  ROUTE_OR_FARE
+  SAFETY
+  OTHER
+}
+
+enum ComplaintStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
 model User {
-  id            String              @id @default(uuid())
-  name          String
-  email         String              @unique
-  passwordHash  String
-  role          UserRole
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  vehicle       Vehicle?
-  rideRequests  RideRequest[]
-  memberships   PoolMembership[]
-  wallet        Wallet?
-  statusChanges RideStatusHistory[]
+  id                 String              @id @default(uuid())
+  name               String
+  email              String              @unique
+  passwordHash       String
+  role               UserRole
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  vehicle            Vehicle?
+  rideRequests       RideRequest[]
+  memberships        PoolMembership[]
+  wallet             Wallet?
+  statusChanges      RideStatusHistory[]
+  // Named because Rating and Complaint point at User more than once.
+  ratingsGiven       Rating[]            @relation("RatingPassenger")
+  ratingsReceived    Rating[]            @relation("RatingDriver")
+  complaintsFiled    Complaint[]         @relation("ComplaintPassenger")
+  complaintsAgainst  Complaint[]         @relation("ComplaintDriver")
+  complaintsResolved Complaint[]         @relation("ComplaintResolver")
 }
 
 model Vehicle {
@@ -110,6 +132,8 @@ model PoolMembership {
   paymentMethod     PaymentMethod?
   paidAt            DateTime?
   walletTransaction WalletTransaction?
+  rating            Rating?
+  complaint         Complaint?
 
   @@index([poolId])
 }
@@ -151,4 +175,44 @@ model WalletTransaction {
   createdAt        DateTime              @default(now())
 
   @@index([walletId, createdAt])
+}
+
+// One per membership (the unique poolMembershipId), so a passenger rates each trip at most once.
+// driverId is copied from pool.vehicle.driverId by FeedbackService, never taken from input.
+model Rating {
+  id               String         @id @default(uuid())
+  poolMembershipId String         @unique
+  poolMembership   PoolMembership @relation(fields: [poolMembershipId], references: [id])
+  passengerId      String
+  passenger        User           @relation("RatingPassenger", fields: [passengerId], references: [id])
+  driverId         String
+  driver           User           @relation("RatingDriver", fields: [driverId], references: [id])
+  stars            Int
+  comment          String?
+  createdAt        DateTime       @default(now())
+
+  @@index([driverId, createdAt])
+}
+
+// One per membership. OPEN until an admin resolves or dismisses it, with a note; that's final.
+model Complaint {
+  id               String            @id @default(uuid())
+  poolMembershipId String            @unique
+  poolMembership   PoolMembership    @relation(fields: [poolMembershipId], references: [id])
+  passengerId      String
+  passenger        User              @relation("ComplaintPassenger", fields: [passengerId], references: [id])
+  driverId         String
+  driver           User              @relation("ComplaintDriver", fields: [driverId], references: [id])
+  category         ComplaintCategory
+  description      String
+  status           ComplaintStatus   @default(OPEN)
+  resolutionNote   String?
+  resolvedById     String?
+  resolvedBy       User?             @relation("ComplaintResolver", fields: [resolvedById], references: [id])
+  resolvedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([driverId, createdAt])
+  @@index([status, createdAt])
 }
