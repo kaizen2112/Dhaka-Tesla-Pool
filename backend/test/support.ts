@@ -28,7 +28,7 @@ export async function resetDb(prisma: PrismaService) {
 
 const WALLET_TOPUP_POYSHA = 50000; // same ৳500 as the seed
 
-// The story cast, plus Karim — a test-only second driver (docs/DATABASE.md). Nobody logs in
+// The story cast with Tania the admin, plus Karim — a test-only second driver (docs/DATABASE.md). Nobody logs in
 // through the API here, so passwords are never checked.
 export async function createCast(prisma: PrismaService) {
   const driver = (name: string, vehicleName: string, isOnline: boolean) =>
@@ -63,6 +63,9 @@ export async function createCast(prisma: PrismaService) {
     nusrat: await passenger('Nusrat'),
     rafiq: await passenger('Rafiq'),
     shirin: await passenger('Shirin'),
+    tania: await prisma.user.create({
+      data: { name: 'Tania', email: 'tania@teslapool.dev', passwordHash: 'unused-in-e2e', role: 'ADMIN' },
+    }),
   };
 }
 

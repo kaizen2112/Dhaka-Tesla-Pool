@@ -7,9 +7,11 @@ import {
 import { Prisma, RideRequest, RideStatus } from '@prisma/client';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import { DomainException } from '../../common/exceptions/domain.exception';
+import { isUniqueViolation } from '../../common/prisma-errors';
 import { ACTIVE_POOL_STATUSES } from '../../common/ride-status';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FareService } from '../fares/fare.service';
+import { FeedbackService } from '../feedback/feedback.service';
 import { CreateRideRequestDto } from './dto/create-ride-request.dto';
 import { MatchingService, MatchRejection, RiderTrip } from './matching.service';
 import { RideStateService } from './ride-state.service';
@@ -94,10 +96,6 @@ function toTrip(member: {
   };
 }
 
-function isUniqueViolation(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
-}
-
 // Co-riders see each other's first name only (docs/API_SPEC.md → GET /pools/:id).
 function firstName(name: string) {
   return name.split(' ')[0];
@@ -120,6 +118,7 @@ export class RidesService {
     private readonly matching: MatchingService,
     private readonly fares: FareService,
     private readonly rideState: RideStateService,
+    private readonly feedback: FeedbackService,
   ) {}
 
   // docs/ARCHITECTURE.md §4.1
@@ -202,6 +201,8 @@ export class RidesService {
             cancelledAt: true,
             paymentMethod: true,
             paidAt: true,
+            rating: { select: { stars: true, comment: true } },
+            complaint: { select: { category: true, status: true, resolutionNote: true } },
           },
         },
       },
@@ -214,6 +215,8 @@ export class RidesService {
       include: {
         membership: {
           include: {
+            rating: { select: { stars: true, comment: true } },
+            complaint: { select: { category: true, status: true, resolutionNote: true } },
             pool: {
               include: {
                 vehicle: { include: { driver: true } },
@@ -248,6 +251,8 @@ export class RidesService {
         cancelledAt: membership.cancelledAt,
         paymentMethod: membership.paymentMethod,
         paidAt: membership.paidAt,
+        rating: membership.rating,
+        complaint: membership.complaint,
       },
       // Passenger view (API_SPEC → GET /pools/:id): co-riders' first names only, no fares.
       pool: pool && {
@@ -255,6 +260,7 @@ export class RidesService {
         status: pool.status,
         vehicleName: pool.vehicle.name,
         driverName: pool.vehicle.driver.name,
+        driverRating: await this.feedback.driverRating(pool.vehicle.driverId),
         capacity: pool.capacity,
         occupiedSeats: pool.occupiedSeats,
         coRiders: pool.memberships
@@ -529,6 +535,7 @@ export class RidesService {
       status: pool.status,
       vehicleName: pool.vehicle.name,
       driverName: pool.vehicle.driver.name,
+      driverRating: await this.feedback.driverRating(pool.vehicle.driverId),
       capacity: pool.capacity,
       occupiedSeats: pool.occupiedSeats,
       coRiders: pool.memberships
