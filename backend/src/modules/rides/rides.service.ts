@@ -270,14 +270,24 @@ export class RidesService {
     };
   }
 
-  // GET /pools/me: the driver's trips, newest first, with every booking (cancelled ones too, so
-  // the history explains itself). Scoped through the vehicle, so another driver's never show.
-  async listMyPools(driverId: string) {
+  // GET /pools/me: the driver's trips. Scoped through the vehicle, so another driver's never show.
+  listMyPools(driverId: string) {
+    return this.listPools({ vehicle: { driverId } }, 20);
+  }
+
+  // GET /admin/pools: everyone's latest trips. Read-only; the admin never changes a pool.
+  listAllPools() {
+    return this.listPools({}, 50);
+  }
+
+  // Newest first, with every booking (cancelled ones too, so the history explains itself).
+  private async listPools(where: Prisma.PoolWhereInput, take: number) {
     const pools = await this.prisma.pool.findMany({
-      where: { vehicle: { driverId } },
+      where,
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take,
       include: {
+        vehicle: { include: { driver: true } },
         memberships: {
           orderBy: { joinedAt: 'asc' },
           include: { passenger: true, rideRequest: true },
@@ -287,6 +297,8 @@ export class RidesService {
     return pools.map((pool) => ({
       id: pool.id,
       status: pool.status,
+      vehicleName: pool.vehicle.name,
+      driverName: pool.vehicle.driver.name,
       pickupZone: pool.pickupZone,
       destinationZone: pool.destinationZone,
       capacity: pool.capacity,

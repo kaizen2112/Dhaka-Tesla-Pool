@@ -6,6 +6,11 @@ export interface RatingSummary {
   distribution: StarDistribution;
 }
 
+// One rounding rule for every place that shows an average (profile, ride card, admin users).
+export function ratingAverage(total: number, count: number) {
+  return count === 0 ? null : Math.round((total / count) * 10) / 10;
+}
+
 // Pure, like the other deciders: a driver's stars in, the numbers the profile shows out.
 export function summarizeRatings(stars: number[]): RatingSummary {
   const distribution: StarDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -13,9 +18,5 @@ export function summarizeRatings(stars: number[]): RatingSummary {
 
   const count = stars.length;
   const total = stars.reduce((sum, s) => sum + s, 0);
-  return {
-    average: count === 0 ? null : Math.round((total / count) * 10) / 10,
-    count,
-    distribution,
-  };
+  return { average: ratingAverage(total, count), count, distribution };
 }

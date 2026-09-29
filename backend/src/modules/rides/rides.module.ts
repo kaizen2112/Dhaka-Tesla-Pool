@@ -12,5 +12,6 @@ import { RidesService } from './rides.service';
   imports: [LocationModule, FareModule, FeedbackModule],
   controllers: [RideRequestsController, PoolsController],
   providers: [RidesService, RideStateService, MatchingService],
+  exports: [RidesService], // for the admin's read-only trip list
 })
 export class RidesModule {}
