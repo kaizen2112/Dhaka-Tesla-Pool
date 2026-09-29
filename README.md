@@ -102,6 +102,14 @@ sequenceDiagram
 | Cancel before the trip starts | Every passenger's fare + breakdown |
 | Pay by cash or **TeslaPay** wallet | Trip history with totals |
 | Ride history, wallet, toasts ("Rafiq joined") | Toasts when passengers join or cancel |
+| ⭐ **Rate the driver** 1–5 ★ + comment, or **report a problem**, after a completed trip | ⭐ **Profile**: average ★, 5 → 1 breakdown, reviews and complaints, all **anonymous** |
+| See the driver's rating ("★ 4.5 (2)") and your report's status + the admin's note | See the admin's note on each complaint |
+
+**🛡 Admin · Tania** (seeded; nobody can register as admin)
+
+| Overview | Complaints | Users | Trips |
+|---|---|---|---|
+| Passengers, drivers online, active trips, completed today, ৳ collected, open complaints | Queue by status; **resolve / dismiss** with a required note the passenger and driver see | Everyone, by role: a driver's car, ★ and open complaints; a passenger's wallet and rides | Every driver's latest trips, read-only |
 
 Also: light/dark mode, a collapsible sidebar, a bottom tab bar on phones, and loading, empty and error states on every screen.
 
@@ -129,8 +137,13 @@ flowchart LR
         RS --> FS["FareService"]
         MS --> LS["LocationService"]
         FS --> LS
+        C --> FB["FeedbackService<br/><b>only writer</b> of ratings/complaints"]
+        C --> AD["AdminService<br/><i>read-only</i>"]
+        RS -- "driver's ★" --> FB
         RS --> PR["Prisma"]
         PS --> PR
+        FB --> PR
+        AD --> PR
     end
 
     PR --> DB[("PostgreSQL 17<br/>Docker · Neon")]
@@ -144,6 +157,7 @@ flowchart LR
 | 🟩 **Pure deciders** (green): matching, fares, state rules and distances never touch the DB | Unit-tested with plain data, no database |
 | ✍️ **One writer**: `RidesService` changes ride/pool state, in one transaction with row locks | Every race is handled in one place |
 | 🪶 **Thin controllers**: validate the DTO, call one method | Business logic lives in services only |
+| 🛡 **Read-only admin**: reads everything, decides complaints through `FeedbackService` | Rides still have exactly one writer; the admin can't break a trip |
 
 ### 🔁 Ride lifecycle
 
@@ -182,11 +196,15 @@ erDiagram
     RIDE_REQUEST ||--o{ RIDE_STATUS_HISTORY : logs
     WALLET ||--o{ WALLET_TRANSACTION : records
     POOL_MEMBERSHIP ||--o| WALLET_TRANSACTION : "paid by"
+    POOL_MEMBERSHIP ||--o| RATING : "rated in"
+    POOL_MEMBERSHIP ||--o| COMPLAINT : "reported in"
+    USER ||--o{ RATING : "gives / receives"
+    USER ||--o{ COMPLAINT : "files / is about / decides"
 
     USER {
         uuid id PK
         string email UK
-        enum role "PASSENGER | DRIVER"
+        enum role "PASSENGER | DRIVER | ADMIN"
     }
     VEHICLE {
         uuid id PK
@@ -233,9 +251,25 @@ erDiagram
         int amountPoysha
         uuid poolMembershipId FK, UK
     }
+    RATING {
+        uuid id PK
+        uuid poolMembershipId FK, UK
+        uuid driverId FK "from the pool, never input"
+        int stars "1-5"
+        string comment
+    }
+    COMPLAINT {
+        uuid id PK
+        uuid poolMembershipId FK, UK
+        uuid driverId FK
+        enum category
+        enum status "OPEN | RESOLVED | DISMISSED"
+        string resolutionNote
+        uuid resolvedById FK "the admin"
+    }
 ```
 
-**Guardrails the database enforces itself**, added as raw SQL in the init migration:
+**Guardrails the database enforces itself**, added as raw SQL in the migrations:
 
 | Guarantee | Constraint |
 |---|---|
@@ -244,19 +278,22 @@ erDiagram
 | One active request per passenger | Partial unique index on `RideRequest(passengerId)` |
 | A membership can't be paid by wallet twice | Unique `WalletTransaction.poolMembershipId` |
 | The wallet never goes negative | `CHECK (balancePoysha >= 0)` |
+| One rating and one complaint per trip | Unique `poolMembershipId` on `Rating` and `Complaint` |
+| Stars are 1–5; a decided complaint always has its note, admin and time | `CHECK`s on `Rating` and `Complaint` |
 
 <details>
 <summary><b>Why each table exists</b></summary>
 
 | Table | Why |
 |---|---|
-| `User` | One table with a `role`. Nobody needs to be both passenger and driver |
+| `User` | One table with a `role`. Nobody needs to be both passenger and driver. `ADMIN` is seeded only |
 | `Vehicle` | One per driver; capacity is fixed at creation |
 | `RideRequest` | A booking, matched or not. Carries the passenger's status |
 | `Pool` | One trip on one car. `capacity` is **copied** so a one-table `CHECK` can guard seats |
 | `PoolMembership` | Request ↔ pool link and the **only place a fare lives**. A cancel sets `cancelledAt`, never deletes |
 | `RideStatusHistory` | Append-only: who changed what, from → to, when |
 | `Wallet` / `WalletTransaction` | Simulated TeslaPay. Append-only CREDIT/DEBIT rows; the balance is a cached sum |
+| `Rating` / `Complaint` | Tied to a booking, which proves the passenger rode with that driver. `driverId` is copied from the pool for cheap profile queries |
 
 </details>
 
@@ -492,6 +529,7 @@ Password for everyone: **`password123`**. The sign-in page also has one-tap tile
 | 🧍 | Nusrat | `nusrat@teslapool.dev` | ৳500 TeslaPay |
 | 🧍 | Rafiq | `rafiq@teslapool.dev` | ৳500 TeslaPay |
 | 🧍 | Shirin | `shirin@teslapool.dev` | ৳500 TeslaPay |
+| 🛡 | Tania | `tania@teslapool.dev` | Admin (seeded only) |
 
 **Try the story.** Use one browser profile per person, because sessions are per browser.
 
@@ -502,6 +540,9 @@ Password for everyone: **`password123`**. The sign-in page also has one-tap tile
 5. Shirin books Banani → Farmgate and takes the **last seat** (3/3).
 6. Jashim marks arrived → start → complete. Final fares: **৳72.00 · ৳68.80 · ৳108.80**.
 7. Everyone pays by cash or TeslaPay.
+8. Nusrat rates Jashim ★★★★★; Shirin **reports** "Ran a red light at Mohakhali".
+9. Tania opens **Complaints** and resolves it with a note. Shirin sees *Resolved* and the note;
+   Jashim's **Profile** shows ★ 5.0 and the complaint, without Shirin's name.
 
 ---
 
@@ -523,6 +564,8 @@ npm run test:e2e                                           # e2e: real Postgres
 | Cancellation rules | e2e: seat released, the last member leaving cancels the pool |
 | Concurrent requests can't corrupt capacity | The race test, with the DB `CHECK` as the backstop |
 | Payments | e2e: double payment and an underfunded wallet are both rejected |
+| Ratings & complaints | e2e: only after `COMPLETED`, only your own booking, once each; the driver's profile never contains a passenger's name or id |
+| Admin | e2e: every `/admin` route refuses passengers and drivers; a complaint is decided once (409 on the second); nobody can register as admin |
 
 <sub>The e2e helper refuses to wipe any database whose name lacks `_test`.</sub>
 
@@ -569,6 +612,10 @@ REST + JSON. Bearer JWT on everything except register, login and health. Money i
 | `PATCH /pools/:id/arrived \| start \| complete` | pool's driver | Lifecycle; `complete` finalizes fares |
 | `GET /fares/estimate` | passenger | A quote before booking |
 | `POST /payments/:membershipId` · `GET /wallet/me` | passenger | Cash or wallet after `COMPLETED`; balance |
+| `POST /ratings/:membershipId` · `POST /complaints/:membershipId` | passenger (owner) | After `COMPLETED`, once each |
+| `GET /drivers/me/profile` | driver | Average ★, breakdown, reviews, complaints (anonymous) |
+| `GET /admin/overview` · `/users` · `/pools` · `/complaints` | admin | Numbers and lists, read-only |
+| `PATCH /admin/complaints/:id` | admin | Resolve / dismiss with a note, once |
 | `GET /health` | public | `{ status, db }` or `503` |
 
 **Errors:** `{ "statusCode": 409, "error": "CAPACITY_EXCEEDED", "message": "…" }`. The UI switches on `error`, never on `message`.
@@ -590,11 +637,14 @@ Dhaka-Tesla-Pool/
 │   │   ├── location/         zones + roads, shortest paths
 │   │   ├── fares/            FareService (pure)
 │   │   ├── rides/            RidesService (writer) · matching + state machine (pure)
-│   │   └── payments/         cash / wallet
-│   └── test/                 e2e on real Postgres (last-seat race, rules, read views)
+│   │   ├── payments/         cash / wallet
+│   │   ├── feedback/         ratings + complaints (only writer), rating summary (pure)
+│   │   └── admin/            read-only admin API
+│   └── test/                 e2e on real Postgres (last-seat race, rules, read views, feedback, admin)
 └── frontend/                 Next.js
-    ├── app/                  (auth) · passenger/{dashboard,request,history,wallet} · driver/{dashboard,ride,trips}
-    ├── components/           ui/ · ride/ (maps, seat map, stepper, timeline) · forms/ · app-shell
+    ├── app/                  (auth) · passenger/{dashboard,request,history,wallet}
+    │                         driver/{dashboard,ride,trips,profile} · admin/{dashboard,complaints,users,trips}
+    ├── components/           ui/ · ride/ (maps, seat map, stepper, timeline, feedback) · admin/ · forms/ · app-shell
     ├── hooks/use-api.ts      fetch + 5 s polling
     └── lib/                  api client, session, zones, types
 ```
@@ -614,6 +664,11 @@ Dhaka-Tesla-Pool/
 | JWT in `localStorage`, no refresh tokens | httpOnly cookie + refresh, auth rate limiting |
 | No idempotency keys | `Idempotency-Key` on booking and payment |
 | No CI | GitHub Actions: lint + unit + e2e on a Postgres service; Playwright |
+| A driver's average is computed on every read | Cache the sum and count on the driver when it gets slow |
+| Feedback is anonymous to the driver, but a trip date can hint at who wrote it | Delay or batch what the driver sees |
+
+**Not built on purpose:** banning or suspending drivers, editing or deleting feedback, driver
+replies, the admin changing rides or refunding fares, rating passengers, email notifications.
 
 </details>
 

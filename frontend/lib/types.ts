@@ -1,7 +1,7 @@
 // Mirrors the backend responses in docs/API_SPEC.md. Dates arrive as ISO strings; money is
 // always integer poysha.
 
-export type Role = "PASSENGER" | "DRIVER";
+export type Role = "PASSENGER" | "DRIVER" | "ADMIN";
 
 export type RideStatus =
   | "REQUESTED"
@@ -239,10 +239,13 @@ export interface Wallet {
   }[];
 }
 
-// GET /pools/me — the driver's trips, newest first (max 20); includes cancelled bookings
+// GET /pools/me — the driver's trips, newest first (max 20); includes cancelled bookings.
+// GET /admin/pools — the same shape, every driver's (max 50).
 export interface DriverTrip {
   id: string;
   status: RideStatus;
+  vehicleName: string;
+  driverName: string;
   pickupZone: string;
   destinationZone: string;
   capacity: number;
@@ -281,4 +284,43 @@ export interface DriverProfile {
     createdAt: string;
     resolvedAt: string | null;
   }[];
+}
+
+// GET /admin/overview
+export interface AdminOverview {
+  users: { passengers: number; drivers: number };
+  driversOnline: number;
+  activePools: number;
+  tripsCompletedToday: number; // since midnight in Dhaka
+  collectedPoysha: number;
+  openComplaints: number;
+}
+
+// GET /admin/users — extra fields depend on the role
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  createdAt: string;
+  vehicle?: { name: string; capacity: number; isOnline: boolean } | null; // drivers
+  rating?: DriverRating; // drivers
+  openComplaints?: number; // drivers
+  walletBalancePoysha?: number; // passengers
+  rides?: number; // passengers
+}
+
+// GET /admin/complaints — the admin sees who reported whom
+export interface AdminComplaint {
+  id: string;
+  category: ComplaintCategory;
+  description: string;
+  status: ComplaintStatus;
+  createdAt: string;
+  passengerName: string;
+  driverName: string;
+  trip: { poolId: string; pickupZone: string; destinationZone: string; date: string };
+  resolutionNote: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
 }

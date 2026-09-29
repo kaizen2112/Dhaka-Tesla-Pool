@@ -11,8 +11,14 @@ const CHANGED = "tesla-pool-session-changed";
 
 export type Session = AuthResponse;
 
+const HOME: Record<Role, string> = {
+  PASSENGER: "/passenger/dashboard",
+  DRIVER: "/driver/dashboard",
+  ADMIN: "/admin/dashboard",
+};
+
 export function homeFor(role: Role) {
-  return role === "DRIVER" ? "/driver/dashboard" : "/passenger/dashboard";
+  return HOME[role];
 }
 
 export function getToken(): string | null {
