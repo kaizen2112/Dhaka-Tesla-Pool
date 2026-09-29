@@ -23,6 +23,7 @@ export default function DriverLayout({ children }: { children: ReactNode }) {
       live: Boolean(pool),
     },
     { href: "/driver/trips", label: "Trips", icon: "trips" },
+    { href: "/driver/profile", label: "Profile", icon: "profile" },
   ];
 
   return (

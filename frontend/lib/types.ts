@@ -1,7 +1,7 @@
 // Mirrors the backend responses in docs/API_SPEC.md. Dates arrive as ISO strings; money is
 // always integer poysha.
 
-export type Role = "PASSENGER" | "DRIVER";
+export type Role = "PASSENGER" | "DRIVER" | "ADMIN";
 
 export type RideStatus =
   | "REQUESTED"
@@ -12,6 +12,28 @@ export type RideStatus =
   | "CANCELLED";
 
 export type PaymentMethod = "CASH" | "WALLET";
+
+export type ComplaintCategory =
+  | "DANGEROUS_DRIVING"
+  | "RUDE_BEHAVIOUR"
+  | "VEHICLE_CONDITION"
+  | "ROUTE_OR_FARE"
+  | "SAFETY"
+  | "OTHER";
+
+export type ComplaintStatus = "OPEN" | "RESOLVED" | "DISMISSED";
+
+// A passenger's own feedback on one booking (docs/API_SPEC.md → Feedback). One of each, at most.
+export interface MembershipFeedback {
+  rating: { stars: number; comment: string | null } | null;
+  complaint: { category: ComplaintCategory; status: ComplaintStatus; resolutionNote: string | null } | null;
+}
+
+// average is null until someone rates (not 0, which would read as "terrible").
+export interface DriverRating {
+  average: number | null;
+  count: number;
+}
 
 export type WaitReason =
   | "NO_OPEN_POOLS"
@@ -68,7 +90,7 @@ export interface CreateRideResponse {
 export interface MyRideRequest extends RideRequest {
   passengerId: string;
   updatedAt: string;
-  membership: (Membership & { poolId: string }) | null;
+  membership: (Membership & MembershipFeedback & { poolId: string }) | null;
 }
 
 // GET /ride-requests/:id and PATCH /ride-requests/:id/cancel
@@ -76,12 +98,14 @@ export interface RideRequestDetail {
   // Only while REQUESTED. reason null = an open pool fits; waiting for its driver to accept.
   waiting: { estimatedFarePoysha: number; reason: WaitReason | null } | null;
   request: RideRequest;
-  membership: Membership | null;
+  membership: (Membership & MembershipFeedback) | null;
   pool: {
     id: string;
     status: RideStatus;
     vehicleName: string;
+    driverId: string;
     driverName: string;
+    driverRating: DriverRating;
     capacity: number;
     occupiedSeats: number;
     coRiders: string[];
@@ -132,7 +156,9 @@ export interface PassengerPool {
   id: string;
   status: RideStatus;
   vehicleName: string;
+  driverId: string;
   driverName: string;
+  driverRating: DriverRating;
   capacity: number;
   occupiedSeats: number;
   coRiders: string[];
@@ -215,10 +241,13 @@ export interface Wallet {
   }[];
 }
 
-// GET /pools/me — the driver's trips, newest first (max 20); includes cancelled bookings
+// GET /pools/me — the driver's trips, newest first (max 20); includes cancelled bookings.
+// GET /admin/pools — the same shape, every driver's (max 50).
 export interface DriverTrip {
   id: string;
   status: RideStatus;
+  vehicleName: string;
+  driverName: string;
   pickupZone: string;
   destinationZone: string;
   capacity: number;
@@ -241,4 +270,70 @@ export interface DriverTrip {
 export interface FareEstimate {
   directKm: number;
   breakdown: FareBreakdown;
+}
+
+// GET /drivers/:id/profile — what a passenger sees. Anonymous, and never any complaints.
+export interface PublicDriverProfile {
+  driver: {
+    id: string;
+    name: string;
+    vehicleName: string | null;
+    vehicleCapacity: number | null;
+    memberSince: string;
+    tripsCompleted: number;
+  };
+  rating: DriverRating & { distribution: Record<1 | 2 | 3 | 4 | 5, number> };
+  reviews: { id: string; stars: number; comment: string | null; createdAt: string }[]; // latest 20
+}
+
+// GET /drivers/me/profile — the public profile plus the complaints about you (still anonymous).
+export interface DriverProfile extends PublicDriverProfile {
+  complaints: {
+    id: string;
+    category: ComplaintCategory;
+    description: string;
+    status: ComplaintStatus;
+    resolutionNote: string | null;
+    createdAt: string;
+    resolvedAt: string | null;
+  }[];
+}
+
+// GET /admin/overview
+export interface AdminOverview {
+  users: { passengers: number; drivers: number };
+  driversOnline: number;
+  activePools: number;
+  tripsCompletedToday: number; // since midnight in Dhaka
+  collectedPoysha: number;
+  openComplaints: number;
+}
+
+// GET /admin/users — extra fields depend on the role
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  createdAt: string;
+  vehicle?: { name: string; capacity: number; isOnline: boolean } | null; // drivers
+  rating?: DriverRating; // drivers
+  openComplaints?: number; // drivers
+  walletBalancePoysha?: number; // passengers
+  rides?: number; // passengers
+}
+
+// GET /admin/complaints — the admin sees who reported whom
+export interface AdminComplaint {
+  id: string;
+  category: ComplaintCategory;
+  description: string;
+  status: ComplaintStatus;
+  createdAt: string;
+  passengerName: string;
+  driverName: string;
+  trip: { poolId: string; pickupZone: string; destinationZone: string; date: string };
+  resolutionNote: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
 }

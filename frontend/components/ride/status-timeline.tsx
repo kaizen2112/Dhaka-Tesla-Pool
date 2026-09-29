@@ -1,5 +1,6 @@
 "use client";
 
+import { Section } from "@/components/ui/section";
 import { useApi } from "@/hooks/use-api";
 import type { HistoryEntry } from "@/lib/types";
 
@@ -50,8 +51,8 @@ function describe(e: HistoryEntry, names: Names): string | null {
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-// The audit trail, told as sentences. Collapsed by default: <details> needs no JS, and it's
-// keyboard and screen-reader friendly.
+// The audit trail, told as sentences. Collapsed by default (a native <details> inside Section):
+// no JS, and keyboard and screen-reader friendly.
 export function StatusTimeline({ poolId, names }: { poolId: string; names: Names }) {
   const { data } = useApi<HistoryEntry[]>(`/pools/${poolId}/history`, POLL_MS);
   const lines = (data ?? []).flatMap((e) => {
@@ -60,14 +61,22 @@ export function StatusTimeline({ poolId, names }: { poolId: string; names: Names
   });
 
   return (
-    <details className="text-sm">
-      <summary className="cursor-pointer text-muted hover:text-foreground">
-        Timeline{lines.length > 0 && <span className="font-mono tabular-nums"> · {lines.length}</span>}
-      </summary>
+    <Section
+      icon="clock"
+      title="Timeline"
+      collapsible
+      aside={
+        lines.length > 0 && (
+          <span className="rounded-full bg-surface px-2 py-0.5 font-mono text-xs text-muted tabular-nums">
+            {lines.length}
+          </span>
+        )
+      }
+    >
       {!data ? (
-        <p className="pt-3 text-xs text-muted">Loading…</p>
+        <p className="text-xs text-muted">Loading…</p>
       ) : (
-        <ol className="flex flex-col gap-2 border-l border-border pt-3 pl-4">
+        <ol className="flex flex-col gap-2 border-l border-border pl-4 text-sm">
           {lines.map((line) => (
             <li key={line.id} className="relative flex gap-3">
               <span aria-hidden className="absolute top-1.5 -left-[19px] size-1.5 rounded-full bg-foreground" />
@@ -79,6 +88,6 @@ export function StatusTimeline({ poolId, names }: { poolId: string; names: Names
           ))}
         </ol>
       )}
-    </details>
+    </Section>
   );
 }

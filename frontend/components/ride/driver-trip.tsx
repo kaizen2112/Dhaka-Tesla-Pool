@@ -9,6 +9,7 @@ import { initialOf, SeatMap } from "@/components/ride/seat-map";
 import { StatusTimeline } from "@/components/ride/status-timeline";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, Skeleton } from "@/components/ui/card";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Toast } from "@/components/ui/toast";
@@ -23,10 +24,26 @@ import { route } from "@/lib/zones";
 
 // The one next step from each status (docs/ARCHITECTURE.md §3 pool transitions). Only that
 // button is shown; the API still rejects anything out of order with INVALID_TRANSITION.
-const NEXT_STEP: Partial<Record<RideStatus, { path: string; label: string; busy: string }>> = {
+// `confirm`: the steps that can't be taken back ask first, in the app's own dialog.
+const NEXT_STEP: Partial<
+  Record<RideStatus, { path: string; label: string; busy: string; confirm?: { title: string; message: string } }>
+> = {
   MATCHED: { path: "arrived", label: "Mark arrived", busy: "Marking arrived…" },
-  DRIVER_ARRIVED: { path: "start", label: "Start trip", busy: "Starting…" },
-  STARTED: { path: "complete", label: "Complete trip", busy: "Completing…" },
+  DRIVER_ARRIVED: {
+    path: "start",
+    label: "Start trip",
+    busy: "Starting…",
+    confirm: { title: "Start the trip?", message: "Passengers can't cancel once the trip has started." },
+  },
+  STARTED: {
+    path: "complete",
+    label: "Complete trip",
+    busy: "Completing…",
+    confirm: {
+      title: "Complete the trip?",
+      message: "This sets every passenger's final fare, and they can then pay. It can't be undone.",
+    },
+  },
 };
 
 const STATUS_LINE: Record<RideStatus, string> = {
@@ -80,6 +97,7 @@ export function DriverTrip({ poolId }: { poolId: string }) {
     pool && { status: pool.status, riders: pool.members.map((m) => m.passengerName) },
     tripChange,
   );
+  const [dialog, confirm] = useConfirm();
 
   if (!pool) {
     if (error) return <ErrorState error={error} onRetry={reload} />;
@@ -90,8 +108,9 @@ export function DriverTrip({ poolId }: { poolId: string }) {
   const final = pool.status === "COMPLETED";
   const highlighted = hovered ?? pinned;
 
-  async function advance(path: string) {
-    if (path === "complete" && !confirm("Complete the trip? This sets everyone's final fare.")) return;
+  async function advance(next: NonNullable<typeof step>) {
+    if (next.confirm && !(await confirm({ ...next.confirm, confirmLabel: next.label }))) return;
+    const { path } = next;
     setBusy(true);
     setActionError(null);
     try {
@@ -199,7 +218,7 @@ export function DriverTrip({ poolId }: { poolId: string }) {
         </p>
       )}
       {step ? (
-        <Button onClick={() => advance(step.path)} disabled={busy} className="self-start">
+        <Button onClick={() => advance(step)} disabled={busy} className="self-start">
           {busy ? step.busy : step.label}
         </Button>
       ) : (
@@ -219,6 +238,7 @@ export function DriverTrip({ poolId }: { poolId: string }) {
         }}
       />
       <Toast message={toast} />
+      {dialog}
     </Card>
   );
 }

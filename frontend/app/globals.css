@@ -16,6 +16,8 @@
   --danger: #dc2626;
   /* The one exception to monochrome (docs/UI_GUIDE.md §2): "you" and your route on the map. */
   --accent: #2563eb;
+  /* Ratings only (stars, the rating section's icon): amber reads as "stars" at a glance. */
+  --star: #d97706;
   /* Driver's map only: one per passenger, Okabe–Ito (colour-blind-safe), darkened for white. */
   --rider-1: #0072b2;
   --rider-2: #e69f00;
@@ -38,6 +40,7 @@
   --primary-foreground: #0a0a0a;
   --danger: #f87171;
   --accent: #60a5fa;
+  --star: #fbbf24;
   --rider-1: #4aa3df;
   --rider-2: #e69f00;
   --rider-3: #19b48a;
@@ -58,6 +61,7 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-danger: var(--danger);
   --color-accent: var(--accent);
+  --color-star: var(--star);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

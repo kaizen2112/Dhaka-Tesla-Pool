@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { FareModule } from '../fares/fare.module';
+import { FeedbackModule } from '../feedback/feedback.module';
 import { LocationModule } from '../location/location.module';
 import { MatchingService } from './matching.service';
 import { PoolsController } from './pools.controller';
@@ -8,8 +9,9 @@ import { RideStateService } from './ride-state.service';
 import { RidesService } from './rides.service';
 
 @Module({
-  imports: [LocationModule, FareModule],
+  imports: [LocationModule, FareModule, FeedbackModule],
   controllers: [RideRequestsController, PoolsController],
   providers: [RidesService, RideStateService, MatchingService],
+  exports: [RidesService], // for the admin's read-only trip list
 })
 export class RidesModule {}

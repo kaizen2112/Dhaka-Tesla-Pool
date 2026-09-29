@@ -6,7 +6,9 @@ import { DomainException } from './common/exceptions/domain.exception';
 import { ApiExceptionFilter } from './common/filters/api-exception.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { FeedbackModule } from './modules/feedback/feedback.module';
 import { HealthModule } from './modules/health/health.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { RidesModule } from './modules/rides/rides.module';
@@ -30,6 +32,8 @@ import { PrismaModule } from './prisma/prisma.module';
     VehiclesModule,
     RidesModule,
     PaymentsModule,
+    FeedbackModule,
+    AdminModule,
     HealthModule,
   ],
   // Registered as APP_* providers (not in main.ts) so e2e tests get them too.

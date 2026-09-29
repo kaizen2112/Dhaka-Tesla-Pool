@@ -47,35 +47,51 @@ export function DriverTrips() {
       <ul className="divide-y divide-border border-y border-border">
         {data.map((trip) => (
           <li key={trip.id}>
-            <Link
-              href={`/driver/ride/${trip.id}`}
-              className="flex items-start justify-between gap-4 rounded-lg px-2 py-3 hover:bg-surface focus-visible:outline-2 focus-visible:outline-foreground"
-            >
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="font-medium">{route(trip.pickupZone, trip.destinationZone)}</span>
-                <span className="text-xs text-muted">{formatDateTime(trip.createdAt)}</span>
-                <span className="text-xs text-muted">
-                  {trip.members.map((m, i) => (
-                    <span key={m.membershipId}>
-                      {i > 0 && ", "}
-                      {m.cancelledAt ? <s title="Cancelled">{m.passengerName}</s> : m.passengerName}
-                    </span>
-                  ))}
-                </span>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                <StatusBadge status={trip.status} />
-                {trip.status !== "CANCELLED" && (
-                  <span className="font-mono text-xs tabular-nums">
-                    {formatTaka(fareTotal(trip))}
-                    {trip.status !== "COMPLETED" && <span className="text-muted"> est.</span>}
-                  </span>
-                )}
-              </div>
-            </Link>
+            <TripRow trip={trip} href={`/driver/ride/${trip.id}`} />
           </li>
         ))}
       </ul>
     </>
+  );
+}
+
+// One trip: route, date, who rode (cancelled bookings struck through), status and fares.
+// The driver's rows link to the trip page; the admin's (showDriver) aren't links, because
+// the admin can read the list but not the driver's trip page.
+export function TripRow({ trip, href, showDriver }: { trip: DriverTrip; href?: string; showDriver?: boolean }) {
+  const content = (
+    <>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="font-medium">{route(trip.pickupZone, trip.destinationZone)}</span>
+        <span className="text-xs text-muted">
+          {formatDateTime(trip.createdAt)}
+          {showDriver && ` · ${trip.driverName} · ${trip.vehicleName}`}
+        </span>
+        <span className="text-xs text-muted">
+          {trip.members.map((m, i) => (
+            <span key={m.membershipId}>
+              {i > 0 && ", "}
+              {m.cancelledAt ? <s title="Cancelled">{m.passengerName}</s> : m.passengerName}
+            </span>
+          ))}
+        </span>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <StatusBadge status={trip.status} />
+        {trip.status !== "CANCELLED" && (
+          <span className="font-mono text-xs tabular-nums">
+            {formatTaka(fareTotal(trip))}
+            {trip.status !== "COMPLETED" && <span className="text-muted"> est.</span>}
+          </span>
+        )}
+      </div>
+    </>
+  );
+  const row = "flex items-start justify-between gap-4 rounded-lg px-2 py-3";
+  if (!href) return <div className={row}>{content}</div>;
+  return (
+    <Link href={href} className={`${row} hover:bg-surface focus-visible:outline-2 focus-visible:outline-foreground`}>
+      {content}
+    </Link>
   );
 }

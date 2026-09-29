@@ -18,6 +18,7 @@ const DEMO_ACCOUNTS = [
   { name: "Nusrat", role: "Passenger", email: "nusrat@teslapool.dev" },
   { name: "Rafiq", role: "Passenger", email: "rafiq@teslapool.dev" },
   { name: "Shirin", role: "Passenger", email: "shirin@teslapool.dev" },
+  { name: "Tania", role: "Admin", email: "tania@teslapool.dev" },
 ];
 
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
@@ -122,7 +123,8 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
           </div>
           <ul className="grid gap-2 sm:grid-cols-2">
             {DEMO_ACCOUNTS.map((a) => (
-              <li key={a.email}>
+              // Five tiles in two columns: the last (Tania, the admin) spans the row.
+              <li key={a.email} className="sm:last:col-span-2">
                 <button
                   type="button"
                   onClick={() => fillDemo(a.email)}

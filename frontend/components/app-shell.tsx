@@ -17,7 +17,14 @@ const ICONS = {
   dashboard: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   trip: "M3 11l18-8-8 18-2-8z",
   trips: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  profile: "M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z",
+  complaints: "M5 21V4M5 4h12l-2.5 4 2.5 4H5",
+  users: "M16 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM21 20v-1a4 4 0 0 0-3-3.9M16 4.1a3.5 3.5 0 0 1 0 6.8",
 };
+
+// The role under your name in the top bar, and the sidebar's heading.
+export const ROLE_LABEL: Record<Role, string> = { PASSENGER: "Passenger", DRIVER: "Driver", ADMIN: "Admin" };
+const SECTION: Record<Role, string> = { PASSENGER: "Riding", DRIVER: "Driving", ADMIN: "Operations" };
 const SIGN_OUT = "M15 17l5-5-5-5M20 12H9M12 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h7";
 const COLLAPSE = "M15 18l-6-6 6-6";
 const EXPAND = "M9 18l6-6-6-6";
@@ -120,7 +127,7 @@ export function AppShell({ role, tabs, children }: { role: Role; tabs: Tab[]; ch
               </span>
               <span className="hidden flex-col leading-tight sm:flex">
                 <span className="font-medium">{name}</span>
-                <span className="text-xs text-muted">{role === "DRIVER" ? "Driver" : "Passenger"}</span>
+                <span className="text-xs text-muted">{ROLE_LABEL[role]}</span>
               </span>
             </div>
             {/* Clearing the session re-runs the effect above, which redirects to /login. */}
@@ -146,7 +153,7 @@ export function AppShell({ role, tabs, children }: { role: Role; tabs: Tab[]; ch
           <nav aria-label="Main" className="flex flex-1 flex-col gap-1 p-3">
             {!collapsed && (
               <p className="px-3 pt-1 pb-2 text-xs font-medium text-muted">
-                {role === "DRIVER" ? "Driving" : "Riding"}
+                {SECTION[role]}
               </p>
             )}
             {tabs.map((tab) => (
