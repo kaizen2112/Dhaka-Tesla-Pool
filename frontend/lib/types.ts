@@ -266,3 +266,19 @@ export interface FareEstimate {
   directKm: number;
   breakdown: FareBreakdown;
 }
+
+// GET /drivers/me/profile — anonymous: no passenger names or ids anywhere.
+export interface DriverProfile {
+  driver: { name: string; vehicleName: string | null };
+  rating: DriverRating & { distribution: Record<1 | 2 | 3 | 4 | 5, number> };
+  reviews: { id: string; stars: number; comment: string | null; createdAt: string }[]; // latest 20
+  complaints: {
+    id: string;
+    category: ComplaintCategory;
+    description: string;
+    status: ComplaintStatus;
+    resolutionNote: string | null;
+    createdAt: string;
+    resolvedAt: string | null;
+  }[];
+}
