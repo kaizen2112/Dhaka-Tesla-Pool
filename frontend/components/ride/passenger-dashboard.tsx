@@ -3,6 +3,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Fare, FareBreakdown, shownFare } from "@/components/ride/fare";
+import {
+  DriverRatingText,
+  FeedbackPanel,
+  feedbackChange,
+  feedbackSnapshot,
+  type FeedbackSnapshot,
+} from "@/components/ride/feedback-panel";
 import { LifecycleStepper } from "@/components/ride/lifecycle-stepper";
 import { PaymentPanel } from "@/components/ride/payment-panel";
 import { initialOf, SeatMap, type Seat } from "@/components/ride/seat-map";
@@ -96,10 +103,11 @@ function statusLine({ request, pool, waiting }: RideRequestDetail) {
 }
 
 // What changed between two polls, told to the passenger. Their own status first, then who
-// got in or out of the Tesla.
+// got in or out of the Tesla, then their feedback (sent, or decided by the admin).
 interface RideSnapshot {
   status: RideStatus;
   coRiders: string[];
+  feedback: FeedbackSnapshot;
 }
 
 function rideChange(before: RideSnapshot, after: RideSnapshot, driver = "Your driver") {
@@ -122,7 +130,8 @@ function rideChange(before: RideSnapshot, after: RideSnapshot, driver = "Your dr
   const joined = after.coRiders.find((n) => !before.coRiders.includes(n));
   if (joined) return `${joined} joined your pool`;
   const left = before.coRiders.find((n) => !after.coRiders.includes(n));
-  return left ? `${left} left the pool` : null;
+  if (left) return `${left} left the pool`;
+  return feedbackChange(before.feedback, after.feedback, driver);
 }
 
 // Your seats filled (you), co-riders outlined with their initial. Co-riders' seat counts aren't
@@ -226,8 +235,9 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
   const { request, membership, pool, waiting } = ride;
   const me = useSession()?.user.name ?? "";
   const final = request.status === "COMPLETED";
-  const toast = useChangeToast({ status: request.status, coRiders: pool?.coRiders ?? [] }, (before, after) =>
-    rideChange(before, after, pool?.driverName),
+  const toast = useChangeToast(
+    { status: request.status, coRiders: pool?.coRiders ?? [], feedback: feedbackSnapshot(membership) },
+    (before, after) => rideChange(before, after, pool?.driverName),
   );
   // A passenger sees only their own entry (API_SPEC → GET /pools/:id/fares).
   const fares = useApi<PoolFares>(pool ? `/pools/${pool.id}/fares` : null, POLL_MS);
@@ -265,7 +275,7 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
         <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-2">
           <dt className="text-muted">Tesla</dt>
           <dd>
-            {pool.vehicleName} · {pool.driverName}
+            {pool.vehicleName} · {pool.driverName} · <DriverRatingText rating={pool.driverRating} />
           </dd>
           <dt className="text-muted">Seats</dt>
           <dd>
@@ -299,6 +309,14 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
         </div>
       )}
       {final && membership && <PaymentPanel membership={membership} onPaid={onChange} />}
+      {final && membership && !membership.cancelledAt && (
+        <FeedbackPanel
+          membershipId={membership.id}
+          driverName={pool?.driverName}
+          feedback={membership}
+          onChange={onChange}
+        />
+      )}
       {final && membership?.paidAt && (
         <Link href="/passenger/request" className={buttonClasses("primary", "md", "self-start")}>
           Request another ride

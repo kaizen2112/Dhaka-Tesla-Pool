@@ -1,11 +1,19 @@
 "use client";
 
-import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from "react";
+import {
+  useId,
+  useState,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from "react";
 
 // docs/UI_GUIDE.md §6: label above, hint or error below, linked with aria-describedby.
 // text-base on mobile stops iOS zooming into the field on focus.
-const CONTROL =
-  "h-10 w-full rounded-lg border border-border-strong bg-background px-3 text-base sm:text-sm hover:border-muted focus-visible:outline-2 focus-visible:outline-foreground";
+const BOX =
+  "w-full rounded-lg border border-border-strong bg-background px-3 text-base sm:text-sm hover:border-muted focus-visible:outline-2 focus-visible:outline-foreground";
+const CONTROL = `h-10 ${BOX}`;
 
 interface FieldProps {
   label: string;
@@ -128,6 +136,28 @@ export function Select({
       >
         {children}
       </select>
+    </Field>
+  );
+}
+
+// Multi-line text (a rating comment, a complaint). Grows with the user's resize handle only.
+export function Textarea({
+  label,
+  hint,
+  error,
+  ...props
+}: FieldProps & TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const id = useId();
+  return (
+    <Field id={id} label={label} hint={hint} error={error}>
+      <textarea
+        id={id}
+        rows={3}
+        className={`${BOX} min-h-20 py-2`}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error || hint ? `${id}-note` : undefined}
+        {...props}
+      />
     </Field>
   );
 }

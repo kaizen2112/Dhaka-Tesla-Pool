@@ -13,6 +13,28 @@ export type RideStatus =
 
 export type PaymentMethod = "CASH" | "WALLET";
 
+export type ComplaintCategory =
+  | "DANGEROUS_DRIVING"
+  | "RUDE_BEHAVIOUR"
+  | "VEHICLE_CONDITION"
+  | "ROUTE_OR_FARE"
+  | "SAFETY"
+  | "OTHER";
+
+export type ComplaintStatus = "OPEN" | "RESOLVED" | "DISMISSED";
+
+// A passenger's own feedback on one booking (docs/API_SPEC.md → Feedback). One of each, at most.
+export interface MembershipFeedback {
+  rating: { stars: number; comment: string | null } | null;
+  complaint: { category: ComplaintCategory; status: ComplaintStatus; resolutionNote: string | null } | null;
+}
+
+// average is null until someone rates (not 0, which would read as "terrible").
+export interface DriverRating {
+  average: number | null;
+  count: number;
+}
+
 export type WaitReason =
   | "NO_OPEN_POOLS"
   | "CAPACITY_EXCEEDED"
@@ -68,7 +90,7 @@ export interface CreateRideResponse {
 export interface MyRideRequest extends RideRequest {
   passengerId: string;
   updatedAt: string;
-  membership: (Membership & { poolId: string }) | null;
+  membership: (Membership & MembershipFeedback & { poolId: string }) | null;
 }
 
 // GET /ride-requests/:id and PATCH /ride-requests/:id/cancel
@@ -76,12 +98,13 @@ export interface RideRequestDetail {
   // Only while REQUESTED. reason null = an open pool fits; waiting for its driver to accept.
   waiting: { estimatedFarePoysha: number; reason: WaitReason | null } | null;
   request: RideRequest;
-  membership: Membership | null;
+  membership: (Membership & MembershipFeedback) | null;
   pool: {
     id: string;
     status: RideStatus;
     vehicleName: string;
     driverName: string;
+    driverRating: DriverRating;
     capacity: number;
     occupiedSeats: number;
     coRiders: string[];
@@ -133,6 +156,7 @@ export interface PassengerPool {
   status: RideStatus;
   vehicleName: string;
   driverName: string;
+  driverRating: DriverRating;
   capacity: number;
   occupiedSeats: number;
   coRiders: string[];
