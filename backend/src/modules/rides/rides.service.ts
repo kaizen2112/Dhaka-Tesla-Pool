@@ -259,6 +259,7 @@ export class RidesService {
         id: pool.id,
         status: pool.status,
         vehicleName: pool.vehicle.name,
+        driverId: pool.vehicle.driverId, // links to GET /drivers/:id/profile
         driverName: pool.vehicle.driver.name,
         driverRating: await this.feedback.driverRating(pool.vehicle.driverId),
         capacity: pool.capacity,
@@ -546,6 +547,7 @@ export class RidesService {
       id: pool.id,
       status: pool.status,
       vehicleName: pool.vehicle.name,
+      driverId: pool.vehicle.driverId,
       driverName: pool.vehicle.driver.name,
       driverRating: await this.feedback.driverRating(pool.vehicle.driverId),
       capacity: pool.capacity,

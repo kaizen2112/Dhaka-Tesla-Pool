@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { CATEGORY_LABELS, ComplaintStatusBadge } from "@/components/ride/feedback-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/card";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { Textarea } from "@/components/ui/field";
 import { Toast } from "@/components/ui/toast";
@@ -107,7 +108,7 @@ export function ComplaintCard({
       <p>{c.description}</p>
       <p className="text-xs text-muted">Reported {formatDateTime(c.createdAt)}</p>
       {c.status === "OPEN" ? (
-        <DecideForm complaintId={c.id} onChange={onChange} />
+        <DecideForm complaint={c} onChange={onChange} />
       ) : (
         <p className="border-l-2 border-border-strong pl-3 text-sm">
           <span className="text-muted">
@@ -122,17 +123,25 @@ export function ComplaintCard({
 }
 
 // A decision is final and always explained: the note goes to the passenger and the driver.
-function DecideForm({ complaintId, onChange }: { complaintId: string; onChange: (toast?: string) => void }) {
+function DecideForm({ complaint, onChange }: { complaint: AdminComplaint; onChange: (toast?: string) => void }) {
   const [note, setNote] = useState("");
+  const [dialog, confirm] = useConfirm();
   const [sending, setSending] = useState<"RESOLVED" | "DISMISSED" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const length = note.trim().length;
 
   async function decide(status: "RESOLVED" | "DISMISSED") {
+    const verb = status === "RESOLVED" ? "Resolve" : "Dismiss";
+    const ok = await confirm({
+      title: `${verb} this complaint?`,
+      message: `This is final. ${complaint.passengerName} and ${complaint.driverName} will see your note.`,
+      confirmLabel: verb,
+    });
+    if (!ok) return;
     setSending(status);
     setError(null);
     try {
-      await api.patch(`/admin/complaints/${complaintId}`, { status, resolutionNote: note.trim() });
+      await api.patch(`/admin/complaints/${complaint.id}`, { status, resolutionNote: note.trim() });
       onChange(status === "RESOLVED" ? "Complaint resolved" : "Complaint dismissed");
     } catch (err) {
       setError(errorMessage(err, { INVALID_TRANSITION: "Someone already decided this complaint. Refreshing." }));
@@ -168,6 +177,7 @@ function DecideForm({ complaintId, onChange }: { complaintId: string; onChange: 
           {sending === "DISMISSED" ? "Dismissing…" : "Dismiss"}
         </Button>
       </div>
+      {dialog}
     </form>
   );
 }

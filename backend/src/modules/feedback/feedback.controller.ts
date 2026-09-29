@@ -31,9 +31,16 @@ export class FeedbackController {
     return this.feedback.complain(user.id, membershipId, dto);
   }
 
+  // `me` must stay above `:id`, or Nest would try to parse "me" as a UUID.
   @Get('drivers/me/profile')
   @Roles('DRIVER')
   profile(@CurrentUser() user: AuthUser) {
     return this.feedback.driverProfile(user.id);
+  }
+
+  @Get('drivers/:id/profile')
+  @Roles('PASSENGER')
+  publicProfile(@Param('id', ParseUUIDPipe) id: string) {
+    return this.feedback.publicDriverProfile(id);
   }
 }

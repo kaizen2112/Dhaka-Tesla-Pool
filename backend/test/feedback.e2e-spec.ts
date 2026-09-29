@@ -78,7 +78,7 @@ describe('Feedback', () => {
       await as(app, cast.rafiq).post(`/ratings/${membershipOf(completed, 'Rafiq')}`, { stars: 4 }).expect(201);
 
       const profile = await as(app, cast.jashim).get('/drivers/me/profile').expect(200);
-      expect(profile.body.driver).toEqual({ name: 'Jashim', vehicleName: 'Bullet' });
+      expect(profile.body.driver).toMatchObject({ name: 'Jashim', vehicleName: 'Bullet', tripsCompleted: 1 });
       expect(profile.body.rating).toEqual({
         average: 4.5,
         count: 2,
@@ -202,6 +202,47 @@ describe('Feedback', () => {
       const profile = await as(app, cast.karim).get('/drivers/me/profile').expect(200);
       expect(profile.body.rating).toMatchObject({ average: null, count: 0 });
       expect(profile.body.reviews).toEqual([]);
+    });
+  });
+
+  describe("a driver's public profile", () => {
+    it("Nusrat sees Jashim's rating, reviews and trips, but no complaints and no names", async () => {
+      const { completed } = await completedStoryTrip();
+      await as(app, cast.rafiq)
+        .post(`/ratings/${membershipOf(completed, 'Rafiq')}`, { stars: 4, comment: 'Took the long way' })
+        .expect(201);
+      await as(app, cast.shirin)
+        .post(`/complaints/${membershipOf(completed, 'Shirin')}`, {
+          category: 'DANGEROUS_DRIVING',
+          description: 'Ran a red light at Mohakhali',
+        })
+        .expect(201);
+
+      const res = await as(app, cast.nusrat).get(`/drivers/${cast.jashim.id}/profile`).expect(200);
+      expect(res.body.driver).toMatchObject({ id: cast.jashim.id, name: 'Jashim', vehicleName: 'Bullet', tripsCompleted: 1 });
+      expect(res.body.rating).toMatchObject({ average: 4, count: 1 });
+      expect(res.body.reviews).toEqual([expect.objectContaining({ stars: 4, comment: 'Took the long way' })]);
+      expect(res.body).not.toHaveProperty('complaints');
+      const raw = JSON.stringify(res.body);
+      expect(raw).not.toContain('Rafiq');
+      expect(raw).not.toContain('red light');
+    });
+
+    it("the ride views carry the driver's id to link to it", async () => {
+      const { completed, requests } = await completedStoryTrip();
+      const nusrat = as(app, cast.nusrat);
+      expect((await nusrat.get(`/ride-requests/${requests.nusrat}`).expect(200)).body.pool.driverId).toBe(cast.jashim.id);
+      expect((await nusrat.get(`/pools/${completed.id}`).expect(200)).body.driverId).toBe(cast.jashim.id);
+    });
+
+    it("404s for an id that isn't a driver", async () => {
+      const nusrat = as(app, cast.nusrat);
+      expectError(await nusrat.get(`/drivers/${cast.rafiq.id}/profile`), 404, 'NOT_FOUND');
+      expectError(await nusrat.get('/drivers/00000000-0000-4000-8000-000000000000/profile'), 404, 'NOT_FOUND');
+    });
+
+    it('is for passengers only', async () => {
+      expectError(await as(app, cast.karim).get(`/drivers/${cast.jashim.id}/profile`), 403, 'FORBIDDEN');
     });
   });
 

@@ -111,7 +111,7 @@ export function RideHistory() {
                   <summary className="flex w-fit cursor-pointer flex-wrap items-center gap-2 rounded text-xs text-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-foreground">
                     {r.membership.rating ? (
                       <span aria-label={`You gave ${r.membership.rating.stars} stars`}>
-                        <span aria-hidden="true">★ {r.membership.rating.stars} given</span>
+                        <span aria-hidden="true"><span className="text-star">★</span> {r.membership.rating.stars} given</span>
                       </span>
                     ) : (
                       "Rate this trip"

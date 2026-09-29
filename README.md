@@ -103,7 +103,8 @@ sequenceDiagram
 | Pay by cash or **TeslaPay** wallet | Trip history with totals |
 | Ride history, wallet, toasts ("Rafiq joined") | Toasts when passengers join or cancel |
 | ⭐ **Rate the driver** 1–5 ★ + comment, or **report a problem**, after a completed trip | ⭐ **Profile**: average ★, 5 → 1 breakdown, reviews and complaints, all **anonymous** |
-| See the driver's rating ("★ 4.5 (2)") and your report's status + the admin's note | See the admin's note on each complaint |
+| **Your driver** card → tap for their profile: ★ rating, breakdown, trips, reviews | See the admin's note on each complaint |
+| Your report's status + the admin's note | |
 
 **🛡 Admin · Tania** (seeded; nobody can register as admin)
 
@@ -614,6 +615,7 @@ REST + JSON. Bearer JWT on everything except register, login and health. Money i
 | `POST /payments/:membershipId` · `GET /wallet/me` | passenger | Cash or wallet after `COMPLETED`; balance |
 | `POST /ratings/:membershipId` · `POST /complaints/:membershipId` | passenger (owner) | After `COMPLETED`, once each |
 | `GET /drivers/me/profile` | driver | Average ★, breakdown, reviews, complaints (anonymous) |
+| `GET /drivers/:id/profile` | passenger | A driver's rating, breakdown, trips and reviews; never complaints |
 | `GET /admin/overview` · `/users` · `/pools` · `/complaints` | admin | Numbers and lists, read-only |
 | `PATCH /admin/complaints/:id` | admin | Resolve / dismiss with a note, once |
 | `GET /health` | public | `{ status, db }` or `503` |

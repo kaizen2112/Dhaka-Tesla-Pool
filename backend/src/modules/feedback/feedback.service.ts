@@ -55,29 +55,49 @@ export class FeedbackService {
     }
   }
 
-  // GET /drivers/me/profile. The selects are the anonymity: nothing about the passenger is read.
+  // GET /drivers/me/profile: the public profile plus the complaints about them.
+  // The selects are the anonymity: nothing about the passenger is read.
   async driverProfile(driverId: string) {
-    const [driver, ratings, complaints] = await Promise.all([
-      this.prisma.user.findUniqueOrThrow({
-        where: { id: driverId },
-        select: { name: true, vehicle: { select: { name: true } } },
-      }),
-      this.prisma.rating.findMany({
-        where: { driverId },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true, stars: true, comment: true, createdAt: true },
-      }),
+    const [profile, complaints] = await Promise.all([
+      this.publicDriverProfile(driverId),
       this.prisma.complaint.findMany({
         where: { driverId },
         orderBy: { createdAt: 'desc' },
         select: DRIVER_COMPLAINT_FIELDS,
       }),
     ]);
+    return { ...profile, complaints };
+  }
+
+  // GET /drivers/:id/profile: what a passenger sees before or after riding with a driver.
+  // Rating, breakdown and reviews, all anonymous. Never complaints: those are between the
+  // driver and the admin.
+  async publicDriverProfile(driverId: string) {
+    const [driver, ratings, tripsCompleted] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: driverId },
+        select: { id: true, name: true, role: true, createdAt: true, vehicle: { select: { name: true, capacity: true } } },
+      }),
+      this.prisma.rating.findMany({
+        where: { driverId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, stars: true, comment: true, createdAt: true },
+      }),
+      this.prisma.pool.count({ where: { status: 'COMPLETED', vehicle: { driverId } } }),
+    ]);
+    // A passenger's or admin's id isn't a driver profile: same answer as an unknown id.
+    if (!driver || driver.role !== 'DRIVER') throw new NotFoundException('Driver not found');
     return {
-      driver: { name: driver.name, vehicleName: driver.vehicle?.name ?? null },
+      driver: {
+        id: driver.id,
+        name: driver.name,
+        vehicleName: driver.vehicle?.name ?? null,
+        vehicleCapacity: driver.vehicle?.capacity ?? null,
+        memberSince: driver.createdAt,
+        tripsCompleted,
+      },
       rating: summarizeRatings(ratings.map((r) => r.stars)),
       reviews: ratings.slice(0, 20),
-      complaints,
     };
   }
 

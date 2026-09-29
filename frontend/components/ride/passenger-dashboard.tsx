@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Fare, FareBreakdown, shownFare } from "@/components/ride/fare";
+import { DriverCard } from "@/components/ride/driver-public-profile";
 import {
-  DriverRatingText,
   FeedbackPanel,
   feedbackChange,
   feedbackSnapshot,
@@ -17,6 +17,7 @@ import { StatusTimeline } from "@/components/ride/status-timeline";
 import { StopList, ZoneMap, zonesBetween } from "@/components/ride/zone-map";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Card, Skeleton } from "@/components/ui/card";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Toast } from "@/components/ui/toast";
@@ -246,9 +247,19 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
   const poolView = useApi<PassengerPool>(pool ? `/pools/${pool.id}` : null, POLL_MS);
   const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [dialog, confirm] = useConfirm();
 
   async function cancel() {
-    if (!confirm("Cancel this ride? Your seat goes back to the pool.")) return;
+    const ok = await confirm({
+      title: "Cancel this ride?",
+      message: pool
+        ? "Your seat goes back to the pool. There's no cancellation fee."
+        : "Your request stops waiting for a driver. There's no cancellation fee.",
+      confirmLabel: "Cancel ride",
+      cancelLabel: "Keep ride",
+      tone: "danger",
+    });
+    if (!ok) return;
     setCancelling(true);
     setActionError(null);
     try {
@@ -272,11 +283,16 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
       {request.status === "REQUESTED" && waiting && <Fare poysha={waiting.estimatedFarePoysha} final={false} />}
 
       {pool && (
+        <DriverCard
+          driverId={pool.driverId}
+          name={pool.driverName}
+          vehicleName={pool.vehicleName}
+          rating={pool.driverRating}
+        />
+      )}
+
+      {pool && (
         <dl className="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-2">
-          <dt className="text-muted">Tesla</dt>
-          <dd>
-            {pool.vehicleName} · {pool.driverName} · <DriverRatingText rating={pool.driverRating} />
-          </dd>
           <dt className="text-muted">Seats</dt>
           <dd>
             <SeatMap capacity={pool.capacity} seats={passengerSeats(ride, me)} />
@@ -340,6 +356,7 @@ function RideCard({ ride, onChange }: { ride: RideRequestDetail; onChange: () =>
         <StatusTimeline poolId={pool.id} names={{ viewer: me, driver: pool.driverName, rider: () => me }} />
       )}
       <Toast message={toast} />
+      {dialog}
     </Card>
   );
 }

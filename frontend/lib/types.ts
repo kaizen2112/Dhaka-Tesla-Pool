@@ -103,6 +103,7 @@ export interface RideRequestDetail {
     id: string;
     status: RideStatus;
     vehicleName: string;
+    driverId: string;
     driverName: string;
     driverRating: DriverRating;
     capacity: number;
@@ -155,6 +156,7 @@ export interface PassengerPool {
   id: string;
   status: RideStatus;
   vehicleName: string;
+  driverId: string;
   driverName: string;
   driverRating: DriverRating;
   capacity: number;
@@ -270,11 +272,22 @@ export interface FareEstimate {
   breakdown: FareBreakdown;
 }
 
-// GET /drivers/me/profile — anonymous: no passenger names or ids anywhere.
-export interface DriverProfile {
-  driver: { name: string; vehicleName: string | null };
+// GET /drivers/:id/profile — what a passenger sees. Anonymous, and never any complaints.
+export interface PublicDriverProfile {
+  driver: {
+    id: string;
+    name: string;
+    vehicleName: string | null;
+    vehicleCapacity: number | null;
+    memberSince: string;
+    tripsCompleted: number;
+  };
   rating: DriverRating & { distribution: Record<1 | 2 | 3 | 4 | 5, number> };
   reviews: { id: string; stars: number; comment: string | null; createdAt: string }[]; // latest 20
+}
+
+// GET /drivers/me/profile — the public profile plus the complaints about you (still anonymous).
+export interface DriverProfile extends PublicDriverProfile {
   complaints: {
     id: string;
     category: ComplaintCategory;

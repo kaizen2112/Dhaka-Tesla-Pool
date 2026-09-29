@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, Textarea } from "@/components/ui/field";
+import { Section } from "@/components/ui/section";
 import { api } from "@/lib/api-client";
 import { errorMessage } from "@/lib/errors";
 import type { ComplaintCategory, ComplaintStatus, DriverRating, MembershipFeedback } from "@/lib/types";
@@ -26,12 +27,12 @@ const DESCRIPTION_MAX = 1000;
 function StarIcon({ filled, className = "size-5" }: { filled: boolean; className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true" strokeWidth="1.5" strokeLinejoin="round">
-      <path d={STAR_PATH} className={filled ? "fill-foreground stroke-foreground" : "fill-none stroke-border-strong"} />
+      <path d={STAR_PATH} className={filled ? "fill-star stroke-star" : "fill-none stroke-border-strong"} />
     </svg>
   );
 }
 
-// Read-only stars, e.g. the rating you gave. Monochrome (docs/UI_GUIDE.md §7): filled vs outlined.
+// Read-only stars, e.g. the rating you gave. Filled in the one rating colour, `star` (docs/UI_GUIDE.md §2).
 export function Stars({ value, className }: { value: number; className?: string }) {
   const filled = Math.round(value);
   return (
@@ -49,7 +50,7 @@ export function DriverRatingText({ rating }: { rating: DriverRating }) {
   return (
     <span aria-label={`rated ${rating.average} out of 5 from ${rating.count} ${rating.count === 1 ? "rating" : "ratings"}`}>
       <span aria-hidden="true">
-        ★ <span className="font-mono tabular-nums">{rating.average.toFixed(1)}</span>{" "}
+        <span className="text-star">★</span> <span className="font-mono tabular-nums">{rating.average.toFixed(1)}</span>{" "}
         <span className="text-muted">({rating.count})</span>
       </span>
     </span>
@@ -101,39 +102,42 @@ export function FeedbackPanel({
   feedback: MembershipFeedback;
   onChange: () => void;
 }) {
+  const driver = driverName ?? "your driver";
   return (
-    <div className="flex flex-col gap-4 border-t border-border pt-4">
+    <>
       {feedback.rating ? (
-        <div className="flex flex-col gap-1">
-          <p className="font-medium">You rated {driverName ?? "your driver"}</p>
-          <Stars value={feedback.rating.stars} className="size-4" />
-          {feedback.rating.comment && <p className="text-sm text-muted">“{feedback.rating.comment}”</p>}
-        </div>
+        <Section icon="star" tone="star" title={`You rated ${driver}`}>
+          <Stars value={feedback.rating.stars} />
+          {feedback.rating.comment && (
+            <p className="border-l-2 border-star pl-3 text-muted">“{feedback.rating.comment}”</p>
+          )}
+        </Section>
       ) : (
-        <RatingForm membershipId={membershipId} driverName={driverName} onDone={onChange} />
+        <Section icon="star" tone="star" title={`Rate ${driver}`}>
+          <RatingForm membershipId={membershipId} driverName={driverName} onDone={onChange} />
+        </Section>
       )}
 
       {feedback.complaint ? (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-medium">Your report · {CATEGORY_LABELS[feedback.complaint.category]}</p>
-            <ComplaintStatusBadge status={feedback.complaint.status} />
-          </div>
-          <p className="text-sm text-muted">
+        <Section
+          icon="flag"
+          tone="danger"
+          title="Your report"
+          aside={<ComplaintStatusBadge status={feedback.complaint.status} />}
+        >
+          <p className="text-sm">{CATEGORY_LABELS[feedback.complaint.category]}</p>
+          <p className="border-l-2 border-border-strong pl-3 text-sm text-muted">
             {feedback.complaint.resolutionNote
               ? `Admin's note: ${feedback.complaint.resolutionNote}`
               : "An admin will review it. The driver never sees your name."}
           </p>
-        </div>
+        </Section>
       ) : (
-        <details>
-          <summary className="w-fit cursor-pointer rounded text-sm text-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-foreground">
-            Report a problem
-          </summary>
+        <Section icon="flag" tone="danger" title="Report a problem" collapsible>
           <ComplaintForm membershipId={membershipId} onDone={onChange} />
-        </details>
+        </Section>
       )}
-    </div>
+    </>
   );
 }
 
@@ -172,7 +176,7 @@ function RatingForm({
     <form onSubmit={submit} className="flex flex-col gap-3">
       {/* Native radios: arrow keys move between stars and screen readers read "4 stars, Good". */}
       <fieldset className="flex flex-col gap-1.5">
-        <legend className="mb-1.5 font-medium">How was your ride with {driverName ?? "your driver"}?</legend>
+        <legend className="mb-1.5 text-sm text-muted">How was your ride with {driverName ?? "your driver"}?</legend>
         <div className="flex items-center gap-3">
           <div className="flex" onMouseLeave={() => setHovered(0)}>
             {[1, 2, 3, 4, 5].map((n) => (
@@ -204,7 +208,7 @@ function RatingForm({
       {stars > 0 && (
         <Textarea
           label="Comment (optional)"
-          hint={`${comment.length}/${COMMENT_MAX}`}
+          hint={`Shown on ${driverName ?? "the driver"}'s profile, without your name · ${comment.length}/${COMMENT_MAX}`}
           maxLength={COMMENT_MAX}
           value={comment}
           onChange={(e) => setComment(e.target.value)}
@@ -244,7 +248,7 @@ function ComplaintForm({ membershipId, onDone }: { membershipId: string; onDone:
   }
 
   return (
-    <form onSubmit={submit} className="mt-3 flex flex-col gap-3">
+    <form onSubmit={submit} className="flex flex-col gap-3">
       <p className="text-sm text-muted">Only the admin sees who sent a report. The driver sees what happened, not who said it.</p>
       <Select label="What happened?" value={category} onChange={(e) => setCategory(e.target.value as ComplaintCategory)}>
         {Object.entries(CATEGORY_LABELS).map(([value, label]) => (

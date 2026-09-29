@@ -56,17 +56,7 @@ export function DriverProfile() {
         {reviews.length === 0 ? (
           <p className="text-muted">No reviews yet.</p>
         ) : (
-          <ul className="divide-y divide-border">
-            {reviews.map((r) => (
-              <li key={r.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
-                <div className="flex items-center justify-between gap-4">
-                  <Stars value={r.stars} className="size-4" />
-                  <span className="text-xs text-muted">{formatDateTime(r.createdAt)}</span>
-                </div>
-                {r.comment ? <p>“{r.comment}”</p> : <p className="text-sm text-muted">No comment</p>}
-              </li>
-            ))}
-          </ul>
+          <ReviewList reviews={reviews} />
         )}
       </Card>
 
@@ -101,9 +91,26 @@ export function DriverProfile() {
   );
 }
 
+// Newest first: stars, date, comment. Shared with the passenger's view of a driver.
+export function ReviewList({ reviews }: { reviews: Profile["reviews"] }) {
+  return (
+    <ul className="divide-y divide-border">
+      {reviews.map((r) => (
+        <li key={r.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
+          <div className="flex items-center justify-between gap-4">
+            <Stars value={r.stars} className="size-4" />
+            <span className="text-xs text-muted">{formatDateTime(r.createdAt)}</span>
+          </div>
+          {r.comment ? <p>“{r.comment}”</p> : <p className="text-sm text-muted">No comment</p>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // 5 → 1, one bar per star value. Plain CSS widths: a chart library for five bars isn't worth it.
 // The count is text, so the bar is decoration and hidden from screen readers.
-function RatingBars({ distribution, count }: { distribution: Profile["rating"]["distribution"]; count: number }) {
+export function RatingBars({ distribution, count }: { distribution: Profile["rating"]["distribution"]; count: number }) {
   return (
     <ul className="flex flex-col gap-2">
       {STAR_VALUES.map((stars) => {
@@ -111,11 +118,11 @@ function RatingBars({ distribution, count }: { distribution: Profile["rating"]["
         return (
           <li key={stars} className="grid grid-cols-[2.5rem_1fr_2rem] items-center gap-3 text-sm">
             <span className="font-mono tabular-nums">
-              {stars} <span aria-hidden="true">★</span>
+              {stars} <span aria-hidden="true" className="text-star">★</span>
               <span className="sr-only">{stars === 1 ? "star" : "stars"}:</span>
             </span>
             <span aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-surface">
-              <span className="block h-full rounded-full bg-foreground" style={{ width: `${(n / count) * 100}%` }} />
+              <span className="block h-full rounded-full bg-star" style={{ width: `${(n / count) * 100}%` }} />
             </span>
             <span className="text-right font-mono tabular-nums">
               {n}
